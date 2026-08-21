@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["data_process","joint_embedding_core"]
+members = ["cnn", "data_process", "joint_embedding_core", "utils"]
 
 [workspace.dependencies]
 ndarray = "0.17"
