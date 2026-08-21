@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = ["data_process","joint_embedding_core"]
+
+[workspace.dependencies]
+ndarray = "0.17"
+rand = "0.10"
+rand_distr = "0.6"
