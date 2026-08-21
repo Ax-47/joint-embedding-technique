@@ -6,3 +6,5 @@ members = ["cnn", "data_process", "joint_embedding_core", "utils"]
 ndarray = "0.17"
 rand = "0.10"
 rand_distr = "0.6"
+utils = { path = "utils" }
+data_process = { path = "data_process" }

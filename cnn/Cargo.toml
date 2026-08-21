@@ -7,3 +7,4 @@ edition = "2024"
 ndarray = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
+utils = { workspace = true }

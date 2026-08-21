@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-data_process = { path = "../data_process" }
+data_process = { workspace = true }

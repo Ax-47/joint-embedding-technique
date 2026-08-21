@@ -32,6 +32,7 @@ dependencies = [
  "ndarray",
  "rand",
  "rand_distr",
+ "utils",
 ]
 
 [[package]]
