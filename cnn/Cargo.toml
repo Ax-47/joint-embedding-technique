@@ -8,3 +8,4 @@ ndarray = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 utils = { workspace = true }
+neural_networks = { workspace = true }

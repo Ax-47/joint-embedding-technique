@@ -1,10 +1,18 @@
 [workspace]
 resolver = "3"
-members = ["cnn", "data_process", "joint_embedding_core", "utils"]
+members = [
+  "cnn",
+  "data_process",
+  "joint_embedding_core",
+  "neural_networks",
+  "utils",
+]
 
 [workspace.dependencies]
+ndarray-rand = { version = "0.16.0" }
 ndarray = "0.17"
 rand = "0.10"
 rand_distr = "0.6"
 utils = { path = "utils" }
 data_process = { path = "data_process" }
+neural_networks = { path = "neural_networks" }

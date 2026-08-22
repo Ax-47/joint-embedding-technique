@@ -1,13 +1,12 @@
 [package]
-name = "joint_embedding_core"
+name = "neural_networks"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-data_process = { workspace = true }
-
 ndarray = { workspace = true }
+
+ndarray-rand = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 utils = { workspace = true }
-neural_networks = { workspace = true }

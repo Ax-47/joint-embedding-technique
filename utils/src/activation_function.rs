@@ -1,4 +1,5 @@
 pub type ActivationFunctionType = Box<dyn Fn(f64) -> f64>;
+
 pub struct ActivationFunctionPair {
     pub function: ActivationFunctionType,
     pub derivative_function: ActivationFunctionType,
