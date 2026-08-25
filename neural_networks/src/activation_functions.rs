@@ -1,13 +1,30 @@
+use core::f64;
+
 use ndarray::Array1;
 use utils::{errors::CategoryResult, morphism::Morphism};
 pub struct Relu;
 
-impl Morphism<f64, f64> for Relu {
+impl Morphism for Relu {
+    type Input = f64;
+    type Output = f64;
     fn name(&self) -> &'static str {
         "relu"
     }
     fn apply(&self, x: f64) -> CategoryResult<f64> {
         Ok(relu(x))
+    }
+}
+
+pub struct ReluPrime;
+
+impl Morphism for ReluPrime {
+    type Input = f64;
+    type Output = f64;
+    fn name(&self) -> &'static str {
+        "relu"
+    }
+    fn apply(&self, x: f64) -> CategoryResult<f64> {
+        Ok(relu_prime(x))
     }
 }
 
