@@ -1,6 +1,6 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, rc::Rc};
 
-use crate::{errors::CategoryResult, morphism::Morphism};
+use crate::{derivative::DerivativeMorphism, errors::CategoryResult, morphism::Morphism};
 
 #[derive(Debug, Clone)]
 pub struct CollectionFunctor<MPhism, Input, Output> {
@@ -30,5 +30,23 @@ where
 
     fn apply(&self, input: Input) -> CategoryResult<Output> {
         input.into_iter().map(|x| self.morphism.apply(x)).collect()
+    }
+}
+
+impl<MPhism, Input, Output> DerivativeMorphism for CollectionFunctor<MPhism, Input, Output>
+where
+    MPhism: DerivativeMorphism + Sized + 'static,
+    MPhism::Input: 'static,
+    MPhism::Output: 'static,
+    Input: IntoIterator<Item = MPhism::Input> + 'static,
+    Output: FromIterator<MPhism::Output> + 'static,
+{
+    type Input = Input;
+    type Output = Output;
+
+    fn derivative(
+        &self,
+    ) -> std::rc::Rc<dyn Morphism<Input = Self::Input, Output = Self::Output> + 'static> {
+        Rc::new(CollectionFunctor::new(self.morphism.derivative()))
     }
 }

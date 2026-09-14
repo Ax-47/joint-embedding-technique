@@ -1,3 +1,4 @@
+pub mod derivative;
 pub mod errors;
 pub mod functors;
 pub mod monoid;

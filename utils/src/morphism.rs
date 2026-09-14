@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, rc::Rc};
 
 use crate::errors::CategoryResult;
 
@@ -16,34 +16,64 @@ pub trait Morphism {
         Compose::new(self, g)
     }
 }
+impl<I, O> Morphism for Rc<dyn Morphism<Input = I, Output = O> + 'static> {
+    type Input = I;
+    type Output = O;
 
-#[derive(Debug, Clone)]
-pub struct CurryingMorphism<F, HyperParameter, Input, Output> {
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn apply(&self, input: Self::Input) -> CategoryResult<Self::Output> {
+        (**self).apply(input)
+    }
+}
+pub struct CurryingMorphism<F, Parameter, Input, Output> {
     f: F,
-    hyper_parameter: HyperParameter,
+    parameter: Parameter,
     _marker: PhantomData<fn(Input) -> Output>,
 }
-
-impl<F, HyperParameter, Input, Output> CurryingMorphism<F, HyperParameter, Input, Output> {
-    pub fn new(f: F, hyper_parameter: HyperParameter) -> Self {
+impl<F: Clone, Parameter: Clone, Input, Output> Clone
+    for CurryingMorphism<F, Parameter, Input, Output>
+{
+    fn clone(&self) -> Self {
         Self {
-            f,
-            hyper_parameter,
+            f: self.f.clone(),
+            parameter: self.parameter.clone(),
             _marker: PhantomData,
         }
     }
-    pub fn update_params(&mut self, new_params: HyperParameter) {
-        self.hyper_parameter = new_params;
+}
+
+impl<F: std::fmt::Debug, Parameter: std::fmt::Debug, Input, Output> std::fmt::Debug
+    for CurryingMorphism<F, Parameter, Input, Output>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CurryingMorphism")
+            .field("f", &self.f)
+            .field("parameter", &self.parameter)
+            .finish()
     }
-    pub fn params(&self) -> &HyperParameter {
-        &self.hyper_parameter
+}
+impl<F, Parameter, Input, Output> CurryingMorphism<F, Parameter, Input, Output> {
+    pub fn new(f: F, parameter: Parameter) -> Self {
+        Self {
+            f,
+            parameter,
+            _marker: PhantomData,
+        }
+    }
+    pub fn update_params(&mut self, new_params: Parameter) {
+        self.parameter = new_params;
+    }
+    pub fn params(&self) -> &Parameter {
+        &self.parameter
     }
 }
 
-impl<F, HyperParameter, Input, Output> Morphism
-    for CurryingMorphism<F, HyperParameter, Input, Output>
+impl<F, Parameter, Input, Output> Morphism for CurryingMorphism<F, Parameter, Input, Output>
 where
-    F: Fn(&HyperParameter, Input) -> Output,
+    F: Fn(&Parameter, Input) -> Output,
 {
     type Input = Input;
     type Output = Output;
@@ -52,7 +82,7 @@ where
     }
 
     fn apply(&self, input: Self::Input) -> CategoryResult<Self::Output> {
-        Ok((self.f)(&self.hyper_parameter, input))
+        Ok((self.f)(&self.parameter, input))
     }
 }
 pub struct Compose<F, G> {
