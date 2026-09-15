@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use utils::currying_morphism::DerivatibleCurryingMorphism;
@@ -14,7 +13,6 @@ pub struct LinearLayerParams {
     pub weight_matrix: Array2<f64>,
     pub bias_matrix: Array1<f64>,
 }
-pub type SharedParams = Rc<RefCell<LinearLayerParams>>;
 
 pub struct LinearLayer {
     pub in_features: usize,
@@ -39,11 +37,11 @@ pub struct AppliedLinearLayer {
 
 impl DerivatibleCurryingMorphism for LinearLayer {
     type Params = LinearLayerParams;
-    type Input = Array1<f64>;
-    type Output = Array1<f64>;
+    type Input = Array2<f64>;
+    type Output = Array2<f64>;
 
-    type DerivativeInput = (Array1<f64>, Array1<f64>);
-    type DerivativeOutput = (LinearLayerParams, Array1<f64>);
+    type DerivativeInput = (Array2<f64>, Array2<f64>);
+    type DerivativeOutput = (LinearLayerParams, Array2<f64>);
     fn curry(
         &self,
         params: &Self::Params,
@@ -62,13 +60,13 @@ impl DerivatibleCurryingMorphism for LinearLayer {
 }
 
 impl Morphism for AppliedLinearLayer {
-    type Input = Array1<f64>;
-    type Output = Array1<f64>;
+    type Input = Array2<f64>;
+    type Output = Array2<f64>;
     fn name(&self) -> &'static str {
         "linear layer (applied)"
     }
     fn apply(&self, input: Self::Input) -> utils::errors::CategoryResult<Self::Output> {
-        Ok(self.params.weight_matrix.t().dot(&input) + &self.params.bias_matrix)
+        Ok(input.dot(&self.params.weight_matrix) + &self.params.bias_matrix)
     }
 }
 
@@ -76,8 +74,8 @@ pub struct DerivativeLinearLayer {
     pub params: LinearLayerParams,
 }
 impl Morphism for DerivativeLinearLayer {
-    type Input = (Array1<f64>, Array1<f64>);
-    type Output = (LinearLayerParams, Array1<f64>);
+    type Input = (Array2<f64>, Array2<f64>);
+    type Output = (LinearLayerParams, Array2<f64>);
     fn name(&self) -> &'static str {
         "derivative linear layer"
     }
@@ -85,12 +83,9 @@ impl Morphism for DerivativeLinearLayer {
         &self,
         (input, grad_output): Self::Input,
     ) -> utils::errors::CategoryResult<Self::Output> {
-        let dw = input
-            .clone()
-            .insert_axis(Axis(1))
-            .dot(&grad_output.clone().insert_axis(Axis(0)));
-        let db = grad_output.clone();
-        let da = self.params.weight_matrix.dot(&grad_output);
+        let dw = input.t().dot(&grad_output);
+        let db = grad_output.sum_axis(Axis(0));
+        let da = grad_output.dot(&self.params.weight_matrix.t());
 
         Ok((
             LinearLayerParams {
@@ -103,8 +98,8 @@ impl Morphism for DerivativeLinearLayer {
 }
 
 impl DerivativeMorphism for AppliedLinearLayer {
-    type Input = (Array1<f64>, Array1<f64>);
-    type Output = (LinearLayerParams, Array1<f64>);
+    type Input = (Array2<f64>, Array2<f64>);
+    type Output = (LinearLayerParams, Array2<f64>);
     fn derivative(&self) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
         Rc::new(DerivativeLinearLayer {
             params: self.params.clone(),

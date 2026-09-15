@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use ndarray::{Array, Array1};
+use ndarray::{Array, Array1, Array2};
 use ndarray_rand::{RandomExt, rand_distr::Normal};
 use utils::{
     currying_morphism::{CurryingMorphism, DerivatibleCurryingMorphism},
@@ -10,7 +10,7 @@ use utils::{
 };
 
 use crate::layers::{layer::LayerImpl, linear::LinearLayerParams};
-pub type V = Array1<f64>;
+pub type V = Array2<f64>;
 
 pub type DynCurrying = dyn LayerImpl<LinearLayerParams, V, V, (V, V), (LinearLayerParams, V)>;
 
@@ -25,21 +25,11 @@ pub enum Layer {
 
 #[derive(Clone)]
 pub enum DerivativeLayer {
-    CurryingMorphism(
-        Rc<
-            dyn Morphism<
-                    Input = (Array1<f64>, Array1<f64>),
-                    Output = (LinearLayerParams, Array1<f64>),
-                >,
-        >,
-    ),
-    Morphism(Rc<dyn Morphism<Input = Array1<f64>, Output = Array1<f64>>>),
+    CurryingMorphism(Rc<dyn Morphism<Input = (V, V), Output = (LinearLayerParams, V)>>),
+    Morphism(Rc<dyn Morphism<Input = V, Output = V>>),
 }
 impl Layer {
-    pub fn curry(
-        &self,
-        params: &LinearLayerParams,
-    ) -> Rc<dyn Morphism<Input = Array1<f64>, Output = Array1<f64>>> {
+    pub fn curry(&self, params: &LinearLayerParams) -> Rc<dyn Morphism<Input = V, Output = V>> {
         match self {
             Layer::CurryingMorphism(l) => l.curry(params),
             Layer::Morphism(r) => r.clone(),
@@ -54,7 +44,7 @@ impl Layer {
 }
 pub struct Sequential {
     layers: Vec<Layer>,
-    dense: Vec<Rc<dyn Morphism<Input = Array1<f64>, Output = Array1<f64>>>>,
+    dense: Vec<Rc<dyn Morphism<Input = V, Output = V>>>,
     derivative_dense: Vec<DerivativeLayer>,
     params: Vec<LinearLayerParams>,
     values: Vec<Array1<f64>>,
@@ -71,9 +61,8 @@ impl Sequential {
     }
 
     pub fn init_params(&mut self) {
-        let layers = std::mem::take(&mut self.layers);
         self.params.clear();
-        for layer in layers.iter() {
+        for layer in self.layers.iter() {
             let param = match layer {
                 Layer::CurryingMorphism(c) => {
                     let (in_features, out_features) = c.features();
@@ -89,11 +78,10 @@ impl Sequential {
                         bias_matrix,
                     }
                 }
-                Layer::Morphism(r) => continue,
+                Layer::Morphism(_) => continue,
             };
             self.params.push(param);
         }
-        self.layers = layers;
     }
     pub fn params(&self) -> Vec<LinearLayerParams> {
         self.params.clone()
@@ -103,11 +91,10 @@ impl Sequential {
         self.params = new_params;
     }
     pub fn currying(&mut self) {
-        let layers = std::mem::take(&mut self.layers);
         self.dense.clear();
         self.derivative_dense.clear();
         let mut params_iter = self.params.iter();
-        for layer in layers.iter() {
+        for layer in self.layers.iter() {
             let (applied, derivative) = match layer {
                 Layer::CurryingMorphism(c) => {
                     let p = params_iter
@@ -125,12 +112,11 @@ impl Sequential {
             self.dense.push(applied);
             self.derivative_dense.push(derivative);
         }
-        self.layers = layers;
     }
     pub fn forward_with_tape(
         &self,
-        input: Array1<f64>,
-    ) -> utils::errors::CategoryResult<(Array1<f64>, Vec<Array1<f64>>)> {
+        input: V,
+    ) -> utils::errors::CategoryResult<(Array2<f64>, Vec<Array2<f64>>)> {
         let mut tape = vec![input.clone()];
         let mut output = input;
         for layer in self.dense.iter() {
@@ -143,8 +129,8 @@ impl Sequential {
 
     pub fn backward(
         &self,
-        tape: Vec<Array1<f64>>,
-        mut grad: Array1<f64>,
+        tape: Vec<Array2<f64>>,
+        mut grad: Array2<f64>,
     ) -> utils::errors::CategoryResult<Vec<LinearLayerParams>> {
         let mut new_params = vec![];
         for (d_layer, output) in self.derivative_dense.iter().zip(tape).rev() {

@@ -1,29 +1,28 @@
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, Axis};
 use utils::{errors::CategoryResult, morphism::Morphism};
 
 pub struct Loss;
 
 impl Morphism for Loss {
-    type Input = (Array1<f64>, Array1<f64>);
+    type Input = (Array2<f64>, Array2<f64>);
     type Output = f64;
     fn name(&self) -> &'static str {
         "Loss"
     }
-    fn apply(&self, (al, y): (Array1<f64>, Array1<f64>)) -> CategoryResult<f64> {
-        let cost = &al - &y;
-        Ok(cost.pow2().sum())
+    fn apply(&self, (al, y): Self::Input) -> CategoryResult<Self::Output> {
+        let diff = &al - &y;
+        Ok(diff.mapv(|x| x * x).sum() / al.len() as f64)
     }
 }
 
 pub struct DerivativeLoss;
 impl Morphism for DerivativeLoss {
-    type Input = (Array1<f64>, Array1<f64>);
-    type Output = Array1<f64>;
+    type Input = (Array2<f64>, Array2<f64>);
+    type Output = Array2<f64>;
     fn name(&self) -> &'static str {
         "Loss"
     }
-    fn apply(&self, (al, y): (Array1<f64>, Array1<f64>)) -> CategoryResult<Array1<f64>> {
-        let cost = 2f64 * (&al - &y);
-        Ok(cost)
+    fn apply(&self, (al, y): Self::Input) -> CategoryResult<Self::Output> {
+        Ok(2.0 * (&al - &y) / al.nrows() as f64)
     }
 }

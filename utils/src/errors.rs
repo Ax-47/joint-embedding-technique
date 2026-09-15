@@ -1,5 +1,7 @@
 use std::{error::Error, fmt};
 
+use ndarray::ShapeError;
+
 #[derive(Debug, Clone)]
 pub enum CategoryError {
     ShapeMismatch {
@@ -27,5 +29,12 @@ impl fmt::Display for CategoryError {
 }
 
 impl Error for CategoryError {}
-
+impl From<ShapeError> for CategoryError {
+    fn from(e: ShapeError) -> Self {
+        CategoryError::ShapeMismatch {
+            expected: vec![],
+            found: vec![],
+        }
+    }
+}
 pub type CategoryResult<Output> = Result<Output, CategoryError>;
