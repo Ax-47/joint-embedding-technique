@@ -1,7 +1,12 @@
 use core::f64;
-
 use ndarray::Array1;
-use utils::{errors::CategoryResult, morphism::Morphism};
+use std::rc::Rc;
+use utils::{
+    derivative::DerivativeMorphism,
+    errors::CategoryResult,
+    functors::CollectionFunctor,
+    morphism::{CurryingMorphism, Morphism},
+};
 pub struct Relu;
 
 impl Morphism for Relu {
@@ -28,6 +33,25 @@ impl Morphism for ReluPrime {
     }
 }
 
+impl DerivativeMorphism for Relu {
+    type Input = f64;
+    type Output = f64;
+    fn derivative(&self) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
+        Rc::new(ReluPrime)
+    }
+}
+
+impl CurryingMorphism for Relu {
+    type Params = ();
+    type Input = f64;
+    type Output = f64;
+    fn curry(
+        &self,
+        _params: &Self::Params,
+    ) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
+        Rc::new(Relu)
+    }
+}
 pub struct LeakyRelu {
     alpha: f64,
 }
