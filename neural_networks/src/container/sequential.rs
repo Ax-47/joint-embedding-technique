@@ -154,7 +154,10 @@ impl Sequential {
                     new_params.push(new_p);
                     gradd
                 }
-                DerivativeLayer::Morphism(d_morphism) => d_morphism.apply(output)?,
+                DerivativeLayer::Morphism(d_morphism) => {
+                    let local = d_morphism.apply(output)?;
+                    local * grad
+                }
             }
         }
         new_params.reverse();
