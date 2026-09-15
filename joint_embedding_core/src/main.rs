@@ -1,68 +1,60 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use data_process::read_byte::DataSet;
-use ndarray::Array1;
 use neural_networks::{
-    activation_functions::{Relu, ReluPrime, relu},
+    activation_functions::Relu,
+    container::sequential::{Layer, Sequential},
     layers::{
-        linear::{LinearLayerParams, new_linear_layer},
+        linear::{LinearLayer, LinearLayerParams},
         loss::{DerivativeLoss, Loss},
     },
 };
-use utils::{
-    functors::CollectionFunctor,
-    morphism::{self, Morphism},
-};
-fn sgd_step(params: &Rc<RefCell<LinearLayerParams>>, grad: &LinearLayerParams, lr: f64) {
-    let (new_w, new_b) = {
-        let p = params.borrow();
-        (
-            &p.weight_matrix - lr * &grad.weight_matrix,
-            &p.bias_matrix - lr * &grad.bias_matrix,
-        )
-    };
-    let mut p = params.borrow_mut();
-    p.weight_matrix = new_w;
-    p.bias_matrix = new_b;
+use utils::{functors::CollectionFunctor, morphism::Morphism};
+fn sgd_step(
+    params: &[LinearLayerParams],
+    grads: &[LinearLayerParams],
+    lr: f64,
+) -> Vec<LinearLayerParams> {
+    let mut new_params = Vec::with_capacity(params.len() + grads.len());
+    for (param, grad) in params.iter().zip(grads) {
+        new_params.push(LinearLayerParams {
+            weight_matrix: &param.weight_matrix - lr * &grad.weight_matrix,
+            bias_matrix: &param.bias_matrix - lr * &grad.bias_matrix,
+        });
+    }
+    new_params
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dataset = DataSet::new(
         "MNIST/train-images-idx3-ubyte",
         "MNIST/train-labels-idx1-ubyte",
     )?;
-    let (forward1, backward1) = new_linear_layer(784, 64);
-    let (forward2, backward2) = new_linear_layer(64, 64);
-    let (forward3, backward3) = new_linear_layer(64, 10);
-    let relu = CollectionFunctor::new(Relu);
-    let relu_prime_layer = CollectionFunctor::new(ReluPrime);
+    let l1 = Rc::new(LinearLayer::new(784, 64));
+    let l2 = Rc::new(LinearLayer::new(64, 64));
+    let l3 = Rc::new(LinearLayer::new(64, 10));
+    let relu = Rc::new(CollectionFunctor::new(Relu));
+    let mut dense = Sequential::new(&[
+        Layer::CurryingMorphism(l1.clone()),
+        Layer::Morphism(relu.clone()),
+        Layer::CurryingMorphism(l2.clone()),
+        Layer::Morphism(relu.clone()),
+        Layer::CurryingMorphism(l3.clone()),
+    ]);
+    dense.init_params();
     let learning_rate = 0.01;
     for epoch in 0..10 {
         for (batch_idx, batch) in dataset.batch_view_iter(1, 60_000).enumerate() {
             let x = batch.images_vecf64().into_flat();
             let y = batch.label_one_hot().into_flat();
 
-            let z1 = forward1.apply(x.clone())?;
-            let a1: Array1<f64> = relu.apply(z1.clone())?;
-            let z2 = forward2.apply(a1.clone())?;
-            let a2: Array1<f64> = relu.apply(z2.clone())?;
-            let a3 = forward3.apply(a2.clone())?;
+            dense.currying();
+            let (last_out, all_outs) = dense.forward_with_tape(x.clone())?;
+            let loss = Loss.apply((last_out.clone(), y.clone()))?;
+            let delta = DerivativeLoss.apply((last_out, y))?;
+            let grads = dense.backward(all_outs, delta)?;
 
-            let loss = Loss.apply((a3.clone(), y.clone()))?;
-            let da3 = DerivativeLoss.apply((a3, y))?;
-
-            let (grad3, da2_raw) = backward3.apply((a2, da3))?;
-            let dz2: Array1<f64> = relu_prime_layer.apply(z2)?;
-            let da2 = &da2_raw * &dz2;
-
-            let (grad2, da1_raw) = backward2.apply((a1, da2))?;
-            let dz1 = relu_prime_layer.apply(z1)?;
-            let da1 = &da1_raw * &dz1;
-
-            let (grad1, _) = backward1.apply((x, da1))?;
-
-            sgd_step(forward1.params(), &grad1, learning_rate);
-            sgd_step(forward2.params(), &grad2, learning_rate);
-            sgd_step(forward3.params(), &grad3, learning_rate);
+            let new_params = sgd_step(&dense.params(), &grads, learning_rate);
+            dense.set_params(new_params);
 
             if batch_idx % 500 == 0 {
                 println!(

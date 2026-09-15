@@ -1,10 +1,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use utils::currying_morphism::DerivatibleCurryingMorphism;
+use utils::derivative::DerivatibleMorphism;
 use utils::derivative::DerivativeMorphism;
-use utils::morphism::{CurryingMorphism, Morphism};
+use utils::morphism::Morphism;
 
 use ndarray::{Array1, Array2, Axis};
+
+use crate::layers::layer::Layer;
 #[derive(Debug, Clone)]
 pub struct LinearLayerParams {
     pub weight_matrix: Array2<f64>,
@@ -24,9 +28,37 @@ impl LinearLayer {
         }
     }
 }
-
+impl Layer for LinearLayer {
+    fn features(&self) -> (usize, usize) {
+        (self.in_features, self.out_features)
+    }
+}
 pub struct AppliedLinearLayer {
     params: LinearLayerParams,
+}
+
+impl DerivatibleCurryingMorphism for LinearLayer {
+    type Params = LinearLayerParams;
+    type Input = Array1<f64>;
+    type Output = Array1<f64>;
+
+    type DerivativeInput = (Array1<f64>, Array1<f64>);
+    type DerivativeOutput = (LinearLayerParams, Array1<f64>);
+    fn curry(
+        &self,
+        params: &Self::Params,
+    ) -> Rc<
+        dyn DerivatibleMorphism<
+                Self::Input,
+                Self::Output,
+                Self::DerivativeInput,
+                Self::DerivativeOutput,
+            >,
+    > {
+        Rc::new(AppliedLinearLayer {
+            params: params.clone(),
+        })
+    }
 }
 
 impl Morphism for AppliedLinearLayer {
@@ -37,20 +69,6 @@ impl Morphism for AppliedLinearLayer {
     }
     fn apply(&self, input: Self::Input) -> utils::errors::CategoryResult<Self::Output> {
         Ok(self.params.weight_matrix.t().dot(&input) + &self.params.bias_matrix)
-    }
-}
-
-impl CurryingMorphism for LinearLayer {
-    type Params = LinearLayerParams;
-    type Input = Array1<f64>;
-    type Output = Array1<f64>;
-    fn curry(
-        &self,
-        params: &Self::Params,
-    ) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
-        Rc::new(AppliedLinearLayer {
-            params: params.clone(),
-        })
     }
 }
 

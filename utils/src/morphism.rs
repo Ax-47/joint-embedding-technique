@@ -28,15 +28,6 @@ impl<I, O> Morphism for Rc<dyn Morphism<Input = I, Output = O> + 'static> {
         (**self).apply(input)
     }
 }
-pub trait CurryingMorphism {
-    type Params;
-    type Input;
-    type Output;
-    fn curry(
-        &self,
-        params: &Self::Params,
-    ) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>>;
-}
 pub struct Compose<F, G> {
     f: F,
     g: G,

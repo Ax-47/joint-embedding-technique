@@ -1,9 +1,8 @@
 use std::{marker::PhantomData, rc::Rc};
 
 use crate::{
-    derivative::DerivativeMorphism,
-    errors::CategoryResult,
-    morphism::{CurryingMorphism, Morphism},
+    currying_morphism::CurryingMorphism, derivative::DerivativeMorphism, errors::CategoryResult,
+    morphism::Morphism,
 };
 
 #[derive(Debug, Clone)]

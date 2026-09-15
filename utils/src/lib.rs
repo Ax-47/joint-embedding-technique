@@ -1,3 +1,4 @@
+pub mod currying_morphism;
 pub mod derivative;
 pub mod errors;
 pub mod functors;

@@ -2,10 +2,8 @@ use core::f64;
 use ndarray::Array1;
 use std::rc::Rc;
 use utils::{
-    derivative::DerivativeMorphism,
-    errors::CategoryResult,
-    functors::CollectionFunctor,
-    morphism::{CurryingMorphism, Morphism},
+    currying_morphism::CurryingMorphism, derivative::DerivativeMorphism, errors::CategoryResult,
+    functors::CollectionFunctor, morphism::Morphism,
 };
 pub struct Relu;
 

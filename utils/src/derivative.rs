@@ -12,6 +12,20 @@ impl<Input, Output> Clone for DerivativeMonoid<Input, Output> {
         Self(self.0.clone())
     }
 }
+pub trait DerivatibleMorphism<I, O, DI, DO>:
+    Morphism<Input = I, Output = O> + DerivativeMorphism<Input = DI, Output = DO>
+{
+    fn as_morphism(self: Rc<Self>) -> Rc<dyn Morphism<Input = I, Output = O>>;
+}
+
+impl<T, I, O, DI, DO> DerivatibleMorphism<I, O, DI, DO> for T
+where
+    T: Morphism<Input = I, Output = O> + DerivativeMorphism<Input = DI, Output = DO> + 'static,
+{
+    fn as_morphism(self: Rc<Self>) -> Rc<dyn Morphism<Input = I, Output = O>> {
+        self
+    }
+}
 pub struct DerivativeMonoid<Input, Output>(
     Vec<Rc<dyn DerivativeMorphism<Input = Input, Output = Output> + 'static>>,
 );
