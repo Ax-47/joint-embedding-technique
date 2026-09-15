@@ -10,6 +10,7 @@ pub enum CategoryError {
     },
     InvalidInput(String),
     NumericalError(String),
+    Backend(String),
 }
 
 impl fmt::Display for CategoryError {
@@ -24,6 +25,8 @@ impl fmt::Display for CategoryError {
             }
             CategoryError::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
             CategoryError::NumericalError(msg) => write!(f, "numerical error: {msg}"),
+
+            CategoryError::Backend(msg) => write!(f, "backend error: {msg}"),
         }
     }
 }
@@ -35,6 +38,11 @@ impl From<ShapeError> for CategoryError {
             expected: vec![],
             found: vec![],
         }
+    }
+}
+impl From<candle_core::Error> for CategoryError {
+    fn from(e: candle_core::Error) -> Self {
+        CategoryError::Backend(e.to_string()) // ปรับตาม variant ที่คุณมี
     }
 }
 pub type CategoryResult<Output> = Result<Output, CategoryError>;

@@ -10,6 +10,7 @@ members = [
 
 [workspace.dependencies]
 ndarray-rand = { version = "0.16.0" }
+candle-core = { version = "0.11", features = ["cuda"] }
 ndarray = "0.17"
 rand = "0.10"
 rand_distr = "0.6"

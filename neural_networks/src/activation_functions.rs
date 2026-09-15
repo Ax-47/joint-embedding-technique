@@ -1,71 +1,86 @@
-use core::f64;
-use ndarray::Array1;
+use candle_core::Tensor;
+use core::f32;
 use std::rc::Rc;
 use utils::{
-    currying_morphism::CurryingMorphism, derivative::DerivativeMorphism, errors::CategoryResult,
-    functors::CollectionFunctor, morphism::Morphism,
+    derivative::{DerivatibleMorphism, DerivativeMorphism},
+    errors::CategoryResult,
+    morphism::Morphism,
 };
+
 pub struct Relu;
+impl DerivativeMorphism for Relu {
+    type Input = (Tensor, Tensor);
+    type Output = Tensor;
+
+    fn derivative(&self) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
+        Rc::new(DerivativeRelu)
+    }
+}
+pub struct DerivativeRelu;
 
 impl Morphism for Relu {
-    type Input = f64;
-    type Output = f64;
+    type Input = Tensor;
+    type Output = Tensor;
+
     fn name(&self) -> &'static str {
         "relu"
     }
-    fn apply(&self, x: f64) -> CategoryResult<f64> {
-        Ok(relu(x))
+
+    fn apply(&self, input: Tensor) -> CategoryResult<Self::Output> {
+        Ok(input.relu()?)
     }
 }
 
-pub struct ReluPrime;
+impl Morphism for DerivativeRelu {
+    type Input = (Tensor, Tensor);
+    type Output = Tensor;
 
-impl Morphism for ReluPrime {
-    type Input = f64;
-    type Output = f64;
     fn name(&self) -> &'static str {
-        "relu"
+        "derivative relu"
     }
-    fn apply(&self, x: f64) -> CategoryResult<f64> {
-        Ok(relu_prime(x))
-    }
-}
 
-impl DerivativeMorphism for Relu {
-    type Input = f64;
-    type Output = f64;
-    fn derivative(&self) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
-        Rc::new(ReluPrime)
-    }
-}
+    fn apply(&self, (input, grad_output): (Tensor, Tensor)) -> CategoryResult<Self::Output> {
+        let mask = input.gt(0.0)?;
+        let mask = mask.to_dtype(grad_output.dtype())?;
 
-impl CurryingMorphism for Relu {
-    type Params = ();
-    type Input = f64;
-    type Output = f64;
-    fn curry(
-        &self,
-        _params: &Self::Params,
-    ) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
-        Rc::new(Relu)
+        Ok(grad_output.broadcast_mul(&mask)?)
     }
 }
 pub struct LeakyRelu {
-    alpha: f64,
+    alpha: f32,
 }
 
-pub fn relu(x: f64) -> f64 {
-    if x < 0.0 { 0.0 } else { x }
+pub struct Sigmoid;
+
+impl Morphism for Sigmoid {
+    type Input = Tensor;
+    type Output = Tensor;
+    fn name(&self) -> &'static str {
+        "sigmoid"
+    }
+    fn apply(&self, x: Tensor) -> utils::errors::CategoryResult<Tensor> {
+        Ok(x.sign()?)
+    }
 }
 
-pub fn relu_prime(x: f64) -> f64 {
-    if x < 0.0 { 0.0 } else { 1.0 }
+pub struct SigmoidDerivative;
+
+impl Morphism for SigmoidDerivative {
+    type Input = Tensor;
+    type Output = Tensor;
+    fn name(&self) -> &'static str {
+        "sigmoid derivative"
+    }
+    fn apply(&self, x: Tensor) -> utils::errors::CategoryResult<Tensor> {
+        let y = x.sign()?;
+        Ok((&y * (1.0 - &y)?)?)
+    }
 }
 
-pub fn leaky_relu(alpha: f64, x: f64) -> f64 {
-    if x < 0.0 { alpha * x } else { x }
-}
-
-pub fn leaky_relu_prime(alpha: f64, x: f64) -> f64 {
-    if x < 0.0 { alpha } else { 1.0 }
+impl DerivativeMorphism for Sigmoid {
+    type Input = Tensor;
+    type Output = Tensor;
+    fn derivative(&self) -> Rc<dyn Morphism<Input = Tensor, Output = Tensor>> {
+        Rc::new(SigmoidDerivative)
+    }
 }

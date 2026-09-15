@@ -1,21 +1,15 @@
 use std::rc::Rc;
 
-use ndarray::{Array, Array1, Array2};
-use ndarray_rand::{RandomExt, rand_distr::Normal};
-use utils::{
-    currying_morphism::{CurryingMorphism, DerivatibleCurryingMorphism},
-    derivative::{DerivatibleMorphism, DerivativeMorphism},
-    monoid::Monoid,
-    morphism::Morphism,
-};
+use candle_core::{DType, Device, Tensor};
+use utils::{derivative::DerivatibleMorphism, monoid::Monoid, morphism::Morphism};
 
 use crate::layers::{layer::LayerImpl, linear::LinearLayerParams};
-pub type V = Array2<f64>;
+pub type V = Tensor;
 
 pub type DynCurrying = dyn LayerImpl<LinearLayerParams, V, V, (V, V), (LinearLayerParams, V)>;
 
 pub type DynDerivatible = dyn DerivatibleMorphism<V, V, (V, V), (LinearLayerParams, V)>;
-pub type DynPlain = dyn DerivatibleMorphism<V, V, V, V>;
+pub type DynPlain = dyn DerivatibleMorphism<V, V, (V, V), V>;
 
 #[derive(Clone)]
 pub enum Layer {
@@ -26,7 +20,7 @@ pub enum Layer {
 #[derive(Clone)]
 pub enum DerivativeLayer {
     CurryingMorphism(Rc<dyn Morphism<Input = (V, V), Output = (LinearLayerParams, V)>>),
-    Morphism(Rc<dyn Morphism<Input = V, Output = V>>),
+    Morphism(Rc<dyn Morphism<Input = (V, V), Output = V>>),
 }
 impl Layer {
     pub fn curry(&self, params: &LinearLayerParams) -> Rc<dyn Morphism<Input = V, Output = V>> {
@@ -47,7 +41,7 @@ pub struct Sequential {
     dense: Vec<Rc<dyn Morphism<Input = V, Output = V>>>,
     derivative_dense: Vec<DerivativeLayer>,
     params: Vec<LinearLayerParams>,
-    values: Vec<Array1<f64>>,
+    values: Vec<Tensor>,
 }
 impl Sequential {
     pub fn new(layers: &[Layer]) -> Self {
@@ -60,28 +54,28 @@ impl Sequential {
         }
     }
 
-    pub fn init_params(&mut self) {
+    pub fn init_params(&mut self, device: Device) -> candle_core::Result<()> {
         self.params.clear();
         for layer in self.layers.iter() {
             let param = match layer {
                 Layer::CurryingMorphism(c) => {
                     let (in_features, out_features) = c.features();
-                    let scale = (2f64 / in_features as f64).sqrt();
-                    let weight_matrix = Array::random(
-                        (in_features, out_features),
-                        Normal::new(0.0, scale).unwrap(),
-                    );
-                    let bias_matrix = Array1::<f64>::zeros(out_features);
-
+                    let bound = (1.0 / in_features as f32).sqrt();
                     LinearLayerParams {
-                        weight_matrix,
-                        bias_matrix,
+                        weight_matrix: Tensor::rand(
+                            -bound,
+                            bound,
+                            (in_features, out_features),
+                            &device,
+                        )?,
+                        bias_matrix: Tensor::zeros(out_features, DType::F32, &device)?,
                     }
                 }
                 Layer::Morphism(_) => continue,
             };
             self.params.push(param);
         }
+        Ok(())
     }
     pub fn params(&self) -> Vec<LinearLayerParams> {
         self.params.clone()
@@ -116,7 +110,7 @@ impl Sequential {
     pub fn forward_with_tape(
         &self,
         input: V,
-    ) -> utils::errors::CategoryResult<(Array2<f64>, Vec<Array2<f64>>)> {
+    ) -> utils::errors::CategoryResult<(Tensor, Vec<Tensor>)> {
         let mut tape = vec![input.clone()];
         let mut output = input;
         for layer in self.dense.iter() {
@@ -129,8 +123,8 @@ impl Sequential {
 
     pub fn backward(
         &self,
-        tape: Vec<Array2<f64>>,
-        mut grad: Array2<f64>,
+        tape: Vec<Tensor>,
+        mut grad: Tensor,
     ) -> utils::errors::CategoryResult<Vec<LinearLayerParams>> {
         let mut new_params = vec![];
         for (d_layer, output) in self.derivative_dense.iter().zip(tape).rev() {
@@ -140,10 +134,7 @@ impl Sequential {
                     new_params.push(new_p);
                     gradd
                 }
-                DerivativeLayer::Morphism(d_morphism) => {
-                    let local = d_morphism.apply(output)?;
-                    local * grad
-                }
+                DerivativeLayer::Morphism(d_morphism) => d_morphism.apply((output, grad))?,
             }
         }
         new_params.reverse();

@@ -5,8 +5,7 @@ edition = "2024"
 
 [dependencies]
 data_process = { workspace = true }
-
-ndarray = { workspace = true }
+candle-core = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 utils = { workspace = true }

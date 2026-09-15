@@ -1,7 +1,9 @@
+use candle_core::{Device, Tensor};
 use ndarray::s;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use std::fs::File;
 use std::io::{Read, Result};
+
 pub struct DataSet {
     pub labels: Array1<u8>,
     pub images: Array2<u8>,
@@ -11,28 +13,33 @@ pub struct BatchView<'a> {
     pub images: ArrayView2<'a, u8>, // (batch, 784)
     pub labels: ArrayView1<'a, u8>, // (batch)
 }
+
 impl<'a> BatchView<'a> {
-    pub fn images_vecf64(&self) -> Array2<f64> {
+    pub fn images_tensor(&self, device: &Device) -> candle_core::Result<Tensor> {
         let (batch, dim) = self.images.dim();
         let mut buf = Vec::with_capacity(batch * dim);
 
         for row in self.images.rows() {
-            buf.extend(row.iter().map(|p| *p as f64 / 255.0));
+            buf.extend(row.iter().map(|p| *p as f32 / 255.0));
         }
 
-        Array2::from_shape_vec((batch, dim), buf).unwrap()
+        Tensor::from_vec(buf, (batch, dim), device)
     }
-    pub fn label_one_hot(&self) -> Array2<f64> {
-        let batch = self.labels.len();
-        let mut buf = Vec::with_capacity(batch * 10);
 
-        for &label in self.labels.iter() {
-            let mut v = vec![0.0; 10];
-            v[label as usize] = 1.0;
-            buf.extend(v);
+    pub fn label_one_hot_tensor(&self, device: &Device) -> candle_core::Result<Tensor> {
+        let batch = self.labels.len();
+        let mut buf = vec![0.0f32; batch * 10];
+
+        for (i, &label) in self.labels.iter().enumerate() {
+            buf[i * 10 + label as usize] = 1.0;
         }
 
-        Array2::from_shape_vec((batch, 10), buf).unwrap()
+        Tensor::from_vec(buf, (batch, 10), device)
+    }
+
+    pub fn labels_u32_tensor(&self, device: &Device) -> candle_core::Result<Tensor> {
+        let buf: Vec<u32> = self.labels.iter().map(|&l| l as u32).collect();
+        Tensor::from_vec(buf, self.labels.len(), device)
     }
 }
 impl DataSet {
