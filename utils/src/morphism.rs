@@ -28,62 +28,14 @@ impl<I, O> Morphism for Rc<dyn Morphism<Input = I, Output = O> + 'static> {
         (**self).apply(input)
     }
 }
-pub struct CurryingMorphism<F, Parameter, Input, Output> {
-    f: F,
-    parameter: Parameter,
-    _marker: PhantomData<fn(Input) -> Output>,
-}
-impl<F: Clone, Parameter: Clone, Input, Output> Clone
-    for CurryingMorphism<F, Parameter, Input, Output>
-{
-    fn clone(&self) -> Self {
-        Self {
-            f: self.f.clone(),
-            parameter: self.parameter.clone(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<F: std::fmt::Debug, Parameter: std::fmt::Debug, Input, Output> std::fmt::Debug
-    for CurryingMorphism<F, Parameter, Input, Output>
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CurryingMorphism")
-            .field("f", &self.f)
-            .field("parameter", &self.parameter)
-            .finish()
-    }
-}
-impl<F, Parameter, Input, Output> CurryingMorphism<F, Parameter, Input, Output> {
-    pub fn new(f: F, parameter: Parameter) -> Self {
-        Self {
-            f,
-            parameter,
-            _marker: PhantomData,
-        }
-    }
-    pub fn update_params(&mut self, new_params: Parameter) {
-        self.parameter = new_params;
-    }
-    pub fn params(&self) -> &Parameter {
-        &self.parameter
-    }
-}
-
-impl<F, Parameter, Input, Output> Morphism for CurryingMorphism<F, Parameter, Input, Output>
-where
-    F: Fn(&Parameter, Input) -> Output,
-{
-    type Input = Input;
-    type Output = Output;
-    fn name(&self) -> &'static str {
-        "currying_morphism"
-    }
-
-    fn apply(&self, input: Self::Input) -> CategoryResult<Self::Output> {
-        Ok((self.f)(&self.parameter, input))
-    }
+pub trait CurryingMorphism {
+    type Params;
+    type Input;
+    type Output;
+    fn curry(
+        &self,
+        params: &Self::Params,
+    ) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>>;
 }
 pub struct Compose<F, G> {
     f: F,

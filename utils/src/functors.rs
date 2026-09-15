@@ -1,6 +1,10 @@
 use std::{marker::PhantomData, rc::Rc};
 
-use crate::{derivative::DerivativeMorphism, errors::CategoryResult, morphism::Morphism};
+use crate::{
+    derivative::DerivativeMorphism,
+    errors::CategoryResult,
+    morphism::{CurryingMorphism, Morphism},
+};
 
 #[derive(Debug, Clone)]
 pub struct CollectionFunctor<MPhism, Input, Output> {
@@ -48,5 +52,25 @@ where
         &self,
     ) -> std::rc::Rc<dyn Morphism<Input = Self::Input, Output = Self::Output> + 'static> {
         Rc::new(CollectionFunctor::new(self.morphism.derivative()))
+    }
+}
+
+impl<MPhism, Input, Output> CurryingMorphism for CollectionFunctor<MPhism, Input, Output>
+where
+    MPhism: CurryingMorphism + Sized + 'static,
+    MPhism::Input: 'static,
+    MPhism::Output: 'static,
+    Input: IntoIterator<Item = MPhism::Input> + 'static,
+    Output: FromIterator<MPhism::Output> + 'static,
+{
+    type Params = MPhism::Params;
+    type Input = Input;
+    type Output = Output;
+
+    fn curry(
+        &self,
+        params: &Self::Params,
+    ) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output> + 'static> {
+        Rc::new(CollectionFunctor::new(self.morphism.curry(params)))
     }
 }
