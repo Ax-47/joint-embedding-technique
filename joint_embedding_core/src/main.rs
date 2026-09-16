@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use candle_core::{DType, Device, Tensor};
+use candle_core::Device;
 
 use data_process::read_byte::DataSet;
 use neural_networks::{
