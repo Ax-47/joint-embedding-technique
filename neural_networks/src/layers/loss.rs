@@ -14,7 +14,6 @@ impl Morphism for Loss {
     fn apply(&self, (al, y): Self::Input) -> CategoryResult<Self::Output> {
         let diff = (&al - &y)?;
         let loss = diff.sqr()?.sum_all()?.to_scalar::<f32>()?;
-
         Ok(loss / al.elem_count() as f32)
     }
 }

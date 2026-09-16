@@ -9,3 +9,4 @@ ndarray-rand = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 utils = { workspace = true }
+data_process = { workspace = true }

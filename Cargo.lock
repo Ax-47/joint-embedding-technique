@@ -1023,6 +1023,7 @@ name = "neural_networks"
 version = "0.1.0"
 dependencies = [
  "candle-core",
+ "data_process",
  "ndarray-rand",
  "rand 0.10.2",
  "rand_distr 0.6.0",
