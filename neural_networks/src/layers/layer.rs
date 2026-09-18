@@ -1,18 +1,20 @@
-use utils::currying_morphism::DerivatibleCurryingMorphism;
+use std::rc::Rc;
 
-pub trait Layer {
+use candle_core::Device;
+use utils::{currying_morphism::DerivatibleCurryingMorphism, derivative::DerivatibleMorphism};
+pub trait LayerShape<Params> {
     fn features(&self) -> (usize, usize);
+    fn init_params(&self, device: &Device) -> candle_core::Result<Params>;
 }
-
 pub trait LayerImpl<Params, Input, Output, Curry, DerivativeInput, DerivativeOutput>:
     DerivatibleCurryingMorphism<
         Params = Params,
         Input = Input,
-        Curry = Curry,
         Output = Output,
+        Curry = Curry,
         DerivativeInput = DerivativeInput,
         DerivativeOutput = DerivativeOutput,
-    > + Layer
+    > + LayerShape<Params>
 {
 }
 
@@ -26,6 +28,6 @@ where
             Curry = Curry,
             DerivativeInput = DerivativeInput,
             DerivativeOutput = DerivativeOutput,
-        > + Layer,
+        > + LayerShape<Params>,
 {
 }

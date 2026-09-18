@@ -5,23 +5,32 @@ use neural_networks::{
     layers::{
         linear::LinearLayerParams,
         loss::{DerivativeLoss, Loss},
+        param_set::ParamSet,
     },
 };
-use utils::{errors::CategoryResult, morphism::Morphism};
+use utils::{
+    errors::{CategoryError, CategoryResult},
+    morphism::Morphism,
+};
 
-fn sgd_step(
-    params: &[LinearLayerParams],
-    grads: &[LinearLayerParams],
-    lr: f64,
-) -> CategoryResult<Vec<LinearLayerParams>> {
-    let mut new_params = Vec::with_capacity(params.len());
-    for (param, grad) in params.iter().zip(grads) {
-        new_params.push(LinearLayerParams {
-            weight_matrix: (&param.weight_matrix - (lr * &grad.weight_matrix)?)?,
-            bias_matrix: (&param.bias_matrix - (lr * &grad.bias_matrix)?)?,
-        });
+pub fn sgd_all(
+    params: &[ParamSet],
+    grads: &[ParamSet],
+    learning_rate: f64,
+) -> CategoryResult<Vec<ParamSet>> {
+    if params.len() != grads.len() {
+        return Err(CategoryError::InvalidInput(format!(
+            "params/grads layer count mismatch: {} vs {}",
+            params.len(),
+            grads.len()
+        )));
     }
-    Ok(new_params)
+
+    params
+        .iter()
+        .zip(grads.iter())
+        .map(|(param, grad)| param.sgd(grad, learning_rate).map_err(CategoryError::from))
+        .collect()
 }
 pub struct TrainStep {
     dataset: DataSet,
@@ -52,7 +61,7 @@ impl TrainStep {
                 let loss = Loss.apply((last_out.clone(), y.clone()))?;
                 let delta = DerivativeLoss.apply((last_out, y))?;
                 let grads = dense.backward(delta)?;
-                let new_params = sgd_step(&dense.params(), &grads, self.learning_rate)?;
+                let new_params = sgd_all(&dense.params(), &grads, self.learning_rate)?;
                 dense.set_params(new_params);
 
                 if batch_idx % 100 == 0 {

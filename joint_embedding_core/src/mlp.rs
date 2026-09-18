@@ -7,8 +7,8 @@ use neural_networks::{
 };
 use std::rc::Rc;
 
-use crate::mlp::train::TrainStep;
 pub(crate) mod train;
+use crate::mlp::train::TrainStep;
 pub fn train_mlp() -> Result<(), Box<dyn std::error::Error>> {
     let dataset = DataSet::new(
         "MNIST/train-images-idx3-ubyte",
@@ -27,7 +27,7 @@ pub fn train_mlp() -> Result<(), Box<dyn std::error::Error>> {
         Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 10))),
     ]);
     let device = Device::cuda_if_available(0)?;
-    dense.init_params(device.clone())?;
+    dense.init_params(&device)?;
     let learning_rate = 0.01;
     let batch_size = 64;
     let train = TrainStep::new(dataset, learning_rate, batch_size, device);

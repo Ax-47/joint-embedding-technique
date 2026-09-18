@@ -1,38 +1,45 @@
 use candle_core::{Device, Tensor};
 use data_process::read_byte::DataSet;
-use neural_networks::{container::sequential::Sequential, layers::linear::LinearLayerParams};
+use neural_networks::container::sequential::Sequential;
+use neural_networks::layers::param_set::ParamSet;
 use std::collections::HashMap;
 use std::io::Write;
 
-use utils::errors::CategoryResult;
+use utils::errors::{CategoryError, CategoryResult};
 
-fn sgd_step(
-    params: &[LinearLayerParams],
-    grads: &[LinearLayerParams],
-    lr: f64,
-) -> CategoryResult<Vec<LinearLayerParams>> {
-    let mut new_params = Vec::with_capacity(params.len());
-    for (param, grad) in params.iter().zip(grads) {
-        new_params.push(LinearLayerParams {
-            weight_matrix: (&param.weight_matrix - (lr * &grad.weight_matrix)?)?,
-            bias_matrix: (&param.bias_matrix - (lr * &grad.bias_matrix)?)?,
-        });
+pub fn add_all(a: &[ParamSet], b: &[ParamSet]) -> CategoryResult<Vec<ParamSet>> {
+    if a.len() != b.len() {
+        return Err(CategoryError::InvalidInput(format!(
+            "layer count mismatch: {} vs {}",
+            a.len(),
+            b.len()
+        )));
     }
-    Ok(new_params)
+
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| x.add(y).map_err(CategoryError::from))
+        .collect()
 }
 
-fn add_params(
-    a: &[LinearLayerParams],
-    b: &[LinearLayerParams],
-) -> CategoryResult<Vec<LinearLayerParams>> {
-    let mut summed = Vec::with_capacity(a.len());
-    for (pa, pb) in a.iter().zip(b) {
-        summed.push(LinearLayerParams {
-            weight_matrix: (&pa.weight_matrix + &pb.weight_matrix)?,
-            bias_matrix: (&pa.bias_matrix + &pb.bias_matrix)?,
-        });
+pub fn sgd_all(
+    params: &[ParamSet],
+    grads: &[ParamSet],
+    learning_rate: f64,
+) -> CategoryResult<Vec<ParamSet>> {
+    if params.len() != grads.len() {
+        return Err(CategoryError::InvalidInput(format!(
+            "params/grads layer count mismatch: {} vs {}",
+            params.len(),
+            grads.len()
+        )));
     }
-    Ok(summed)
+
+    params
+        .iter()
+        .zip(grads.iter())
+        .map(|(param, grad)| param.sgd(grad, learning_rate).map_err(CategoryError::from))
+        .collect()
 }
 
 pub struct SiameseTrainStep {
@@ -110,9 +117,8 @@ impl SiameseTrainStep {
 
                 let grads_left = embed.backward(delta_left)?;
                 let grads_right = embed.backward(delta_right)?;
-                let grads = add_params(&grads_left, &grads_right)?;
-
-                let new_params = sgd_step(&embed.params(), &grads, self.learning_rate)?;
+                let grads = add_all(&grads_left, &grads_right)?;
+                let new_params = sgd_all(&embed.params(), &grads, self.learning_rate)?;
                 embed.set_params(new_params);
 
                 if step % 100 == 0 {

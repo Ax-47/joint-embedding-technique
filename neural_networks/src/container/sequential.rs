@@ -1,14 +1,16 @@
 use std::rc::Rc;
 
-use candle_core::{DType, Device, Tensor};
-use utils::{derivative::DerivatibleMorphism, monoid::Monoid, morphism::Morphism};
+use candle_core::{Device, Tensor};
+use utils::{
+    derivative::DerivatibleMorphism, errors::CategoryResult, monoid::Monoid, morphism::Morphism,
+};
 
-use crate::layers::{layer::LayerImpl, linear::LinearLayerParams};
+use crate::layers::{layer::LayerImpl, param_set::ParamSet};
+
 pub type V = Tensor;
 
-pub type DynCurrying = dyn LayerImpl<LinearLayerParams, V, V, V, V, (LinearLayerParams, V)>;
-
-pub type DynDerivatible = dyn DerivatibleMorphism<V, V, V, V, (LinearLayerParams, V)>;
+pub type DynCurrying = dyn LayerImpl<ParamSet, V, V, V, V, (ParamSet, V)>;
+pub type DynDerivatible = dyn DerivatibleMorphism<V, V, V, V, (ParamSet, V)>;
 pub type DynPlain = dyn DerivatibleMorphism<V, V, V, V, V>;
 
 #[derive(Clone)]
@@ -25,90 +27,92 @@ pub enum DerivativeLayer {
 
 #[derive(Clone)]
 pub enum DerivativedLayer {
-    CurryingMorphism(Rc<dyn Morphism<Input = V, Output = (LinearLayerParams, V)>>),
+    CurryingMorphism(Rc<dyn Morphism<Input = V, Output = (ParamSet, V)>>),
     Morphism(Rc<dyn Morphism<Input = V, Output = V>>),
 }
+
 impl Layer {
-    pub fn curry(&self, params: &LinearLayerParams) -> DerivativeLayer {
+    pub fn curry(&self, params: &ParamSet) -> DerivativeLayer {
         match self {
-            Layer::CurryingMorphism(l) => DerivativeLayer::CurryingMorphism(l.curry(params)),
-            Layer::Morphism(r) => DerivativeLayer::Morphism(r.clone()),
+            Layer::CurryingMorphism(layer) => {
+                DerivativeLayer::CurryingMorphism(layer.curry(params))
+            }
+            Layer::Morphism(morphism) => DerivativeLayer::Morphism(morphism.clone()),
         }
     }
+
     pub fn is_currying_morphism(&self) -> bool {
-        match self {
-            Layer::CurryingMorphism(_) => true,
-            Layer::Morphism(_) => false,
-        }
+        matches!(self, Layer::CurryingMorphism(_))
     }
 }
 pub struct Sequential {
     layers: Vec<Layer>,
     derivative_dense: Vec<DerivativedLayer>,
-    params: Vec<LinearLayerParams>,
-    values: Vec<Tensor>,
+    params: Vec<ParamSet>,
 }
+
 impl Sequential {
     pub fn new(layers: &[Layer]) -> Self {
         Self {
-            layers: Vec::from(layers),
-            params: Vec::new(),
-            derivative_dense: Vec::new(),
-            values: Vec::new(),
+            layers: layers.to_vec(),
+            derivative_dense: Vec::with_capacity(layers.len()),
+            params: Vec::with_capacity(layers.len()),
         }
     }
 
-    pub fn init_params(&mut self, device: Device) -> candle_core::Result<()> {
+    pub fn init_params(&mut self, device: &Device) -> candle_core::Result<()> {
         self.params.clear();
-        for layer in self.layers.iter() {
-            let param = match layer {
-                Layer::CurryingMorphism(c) => {
-                    let (in_features, out_features) = c.features();
-                    let bound = (1.0 / in_features as f32).sqrt();
-                    LinearLayerParams {
-                        weight_matrix: Tensor::rand(
-                            -bound,
-                            bound,
-                            (in_features, out_features),
-                            &device,
-                        )?,
-                        bias_matrix: Tensor::zeros(out_features, DType::F32, &device)?,
-                    }
-                }
-                Layer::Morphism(_) => continue,
-            };
-            self.params.push(param);
+        for layer in &self.layers {
+            if let Layer::CurryingMorphism(currying) = layer {
+                self.params.push(currying.init_params(device)?);
+            }
         }
         Ok(())
     }
-    pub fn params(&self) -> &[LinearLayerParams] {
+
+    pub fn params(&self) -> &[ParamSet] {
         &self.params
     }
 
-    pub fn set_params(&mut self, new_params: Vec<LinearLayerParams>) {
+    pub fn set_params(&mut self, new_params: Vec<ParamSet>) {
+        debug_assert_eq!(new_params.len(), self.params.len());
         self.params = new_params;
         self.derivative_dense.clear();
     }
-    pub fn forward(&mut self, input: V) -> utils::errors::CategoryResult<Tensor> {
+
+    pub fn forward(&mut self, input: V) -> CategoryResult<Tensor> {
+        self.derivative_dense.clear();
+        self.derivative_dense.reserve(self.layers.len());
+
         let mut output = input;
         let mut params_iter = self.params.iter();
-        for layer in self.layers.iter() {
+
+        for layer in &self.layers {
             match layer {
-                Layer::CurryingMorphism(cm) => {
-                    let p = params_iter
+                Layer::CurryingMorphism(currying) => {
+                    let params = params_iter
                         .next()
                         .expect("not enough params for currying layers");
-                    let morphism = cm.curry(p);
+
+                    let morphism = currying.curry(params);
+                    let layer_input = output;
+
+                    // เก็บ tape ด้วย input (ไม่ใช่ output) → backward ถูกต้อง
                     self.derivative_dense
                         .push(DerivativedLayer::CurryingMorphism(
-                            morphism.derivative(output.clone()),
+                            morphism.derivative(layer_input.clone()),
                         ));
-                    output = morphism.apply(output)?;
+
+                    output = morphism.apply(layer_input)?;
                 }
-                Layer::Morphism(m) => {
-                    output = m.apply(output)?;
-                    self.derivative_dense
-                        .push(DerivativedLayer::Morphism(m.derivative(output.clone())));
+                Layer::Morphism(morphism) => {
+                    let layer_input = output;
+
+                    self.derivative_dense.push(DerivativedLayer::Morphism(
+                        morphism.derivative(layer_input.clone()),
+                    ));
+
+                    output = morphism.apply(layer_input)?;
                 }
             }
         }
@@ -116,53 +120,55 @@ impl Sequential {
         Ok(output)
     }
 
-    pub fn backward(
-        &mut self,
-        mut grad: Tensor,
-    ) -> utils::errors::CategoryResult<Vec<LinearLayerParams>> {
-        let mut new_params = vec![];
-        for d_layer in self.derivative_dense.iter().rev() {
-            grad = match d_layer {
-                DerivativedLayer::CurryingMorphism(d_cmorphism) => {
-                    let (new_p, gradd) = d_cmorphism.apply(grad)?;
-                    new_params.push(new_p);
-                    gradd
+    pub fn backward(&mut self, mut grad: Tensor) -> CategoryResult<Vec<ParamSet>> {
+        let tapes = std::mem::take(&mut self.derivative_dense);
+
+        let currying_count = tapes
+            .iter()
+            .filter(|layer| matches!(layer, DerivativedLayer::CurryingMorphism(_)))
+            .count();
+
+        let mut gradients = Vec::with_capacity(currying_count);
+
+        for layer in tapes.into_iter().rev() {
+            match layer {
+                DerivativedLayer::CurryingMorphism(derivative) => {
+                    let (layer_grad, input_grad) = derivative.apply(grad)?;
+                    gradients.push(layer_grad);
+                    grad = input_grad;
                 }
-                DerivativedLayer::Morphism(d_morphism) => d_morphism.apply(grad)?,
+                DerivativedLayer::Morphism(derivative) => {
+                    grad = derivative.apply(grad)?;
+                }
             }
         }
 
-        new_params.reverse();
-        Ok(new_params)
+        gradients.reverse();
+        Ok(gradients)
     }
 }
-
 impl Monoid for Sequential {
     fn empty() -> Self {
         Self {
             layers: Vec::new(),
-            params: Vec::new(),
             derivative_dense: Vec::new(),
-            values: Vec::new(),
+            params: Vec::new(),
         }
     }
-    fn combine(&self, other: &Self) -> Self {
-        let mut combined_layers = Vec::with_capacity(self.layers.len() + other.layers.len());
-        combined_layers.extend(self.layers.iter().cloned());
-        combined_layers.extend(other.layers.iter().cloned());
 
-        let mut combined_values = Vec::with_capacity(self.values.len() + other.values.len());
-        combined_values.extend(self.values.iter().cloned());
-        combined_values.extend(other.values.iter().cloned());
-        let mut combined_params = Vec::with_capacity(self.params.len() + other.params.len());
-        combined_params.extend(self.params.iter().cloned());
-        combined_params.extend(other.params.iter().cloned());
+    fn combine(&self, other: &Self) -> Self {
+        let mut layers = Vec::with_capacity(self.layers.len() + other.layers.len());
+        layers.extend_from_slice(&self.layers);
+        layers.extend_from_slice(&other.layers);
+
+        let mut params = Vec::with_capacity(self.params.len() + other.params.len());
+        params.extend_from_slice(&self.params);
+        params.extend_from_slice(&other.params);
 
         Self {
-            layers: combined_layers,
+            layers,
             derivative_dense: Vec::new(),
-            params: combined_params,
-            values: combined_values,
+            params,
         }
     }
 }

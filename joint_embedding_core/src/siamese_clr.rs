@@ -31,7 +31,7 @@ pub fn train_siamese_clr() -> Result<(), Box<dyn std::error::Error>> {
         Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 10))),
     ]);
     let device = Device::cuda_if_available(0)?;
-    dense.init_params(device.clone())?;
+    dense.init_params(&device)?;
     let learning_rate = 0.01;
     let batch_size = 64;
     let train = SiameseCLRTrainStep::new(dataset, learning_rate, batch_size, (15, 15), device);
