@@ -7,9 +7,9 @@ use neural_networks::{
 };
 use std::rc::Rc;
 
-use crate::siamese_net::train::SiameseTrainStep;
+use crate::barlow::train::BarlowTrainStep;
 pub(crate) mod train;
-pub fn train_siamese_net() -> Result<(), Box<dyn std::error::Error>> {
+pub fn train_barlow() -> Result<(), Box<dyn std::error::Error>> {
     let dataset = DataSet::new(
         "MNIST/train-images-idx3-ubyte",
         "MNIST/train-labels-idx1-ubyte",
@@ -30,16 +30,24 @@ pub fn train_siamese_net() -> Result<(), Box<dyn std::error::Error>> {
         Layer::Morphism(relu.clone()),
         Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 10))),
     ]);
+
+    let mut projector = Sequential::new(&[
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(10, 6))),
+        Layer::Morphism(relu.clone()),
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(6, 7))),
+        Layer::Morphism(relu.clone()),
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(7, 10))),
+    ]);
     let device = Device::cuda_if_available(0)?;
     dense.init_params(device.clone())?;
     let learning_rate = 0.01;
     let batch_size = 64;
-    let train = SiameseTrainStep::new(dataset, learning_rate, batch_size, (5, 5), device);
-    for _ in 0..2 {
+    let train = BarlowTrainStep::new(dataset, learning_rate, batch_size, (5, 5), device);
+    for _ in 0..10 {
         train.train(&mut dense)?;
     }
 
     train.test(&mut dense, testset.clone())?;
-    train.export_embeddings_2d(&mut dense, &testset, 2000, "output/embeddings_2d.csv")?;
+    train.export_embeddings_2d(&mut dense, &testset, 10000, "output/embeddings_2d.csv")?;
     Ok(())
 }

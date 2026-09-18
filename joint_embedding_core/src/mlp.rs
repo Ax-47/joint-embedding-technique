@@ -32,6 +32,6 @@ pub fn train_mlp() -> Result<(), Box<dyn std::error::Error>> {
     let batch_size = 64;
     let train = TrainStep::new(dataset, learning_rate, batch_size, device);
     train.train(&mut dense)?;
-    train.test(&dense, testset)?;
+    train.test(&mut dense, testset)?;
     Ok(())
 }

@@ -47,7 +47,7 @@ pub struct SiameseCLRTrainStep {
 impl SiameseCLRTrainStep {
     pub fn export_embeddings_2d(
         &self,
-        embed: &Sequential,
+        embed: &mut Sequential,
         dataset: &DataSet,
         limit: usize,
         out_path: &str,
@@ -57,7 +57,7 @@ impl SiameseCLRTrainStep {
 
         for batch in dataset.batch_view_iter(200, limit) {
             let images = batch.images_tensor(&self.device)?;
-            let (emb, _) = embed.forward_with_tape(images)?; // (batch, dim)
+            let emb = embed.forward(images)?; // (batch, dim)
             let emb_vec: Vec<Vec<f32>> = emb.to_vec2()?;
             all_embs.extend(emb_vec);
             all_labels.extend(batch.labels.iter().copied());
@@ -99,10 +99,8 @@ impl SiameseCLRTrainStep {
             for step in 0..steps_per_epoch {
                 let views = self.dataset.sample_views(b, self.cut_shape, &self.device)?;
 
-                embed.currying();
-                let (left_emb, left_outs) = embed.forward_with_tape(views.left)?;
-                embed.currying();
-                let (right_emb, right_outs) = embed.forward_with_tape(views.right)?;
+                let left_emb = embed.forward(views.left)?;
+                let right_emb = embed.forward(views.right)?;
 
                 // รวมเป็น (2B, dim): แถว 0..B = left view, แถว B..2B = right view
                 let all_emb = Tensor::cat(&[&left_emb, &right_emb], 0)?;
@@ -152,8 +150,8 @@ impl SiameseCLRTrainStep {
                 let delta_left = de.narrow(0, 0, b)?;
                 let delta_right = de.narrow(0, b, b)?;
 
-                let grads_left = embed.backward(left_outs, delta_left)?;
-                let grads_right = embed.backward(right_outs, delta_right)?;
+                let grads_left = embed.backward(delta_left)?;
+                let grads_right = embed.backward(delta_right)?;
                 let grads = add_params(&grads_left, &grads_right)?;
 
                 let new_params = sgd_step(&embed.params(), &grads, self.learning_rate)?;
@@ -166,13 +164,16 @@ impl SiameseCLRTrainStep {
         }
         Ok(())
     }
-    fn compute_class_centroids(&self, embed: &Sequential) -> CategoryResult<HashMap<u8, Tensor>> {
+    fn compute_class_centroids(
+        &self,
+        embed: &mut Sequential,
+    ) -> CategoryResult<HashMap<u8, Tensor>> {
         let mut sums: HashMap<u8, Tensor> = HashMap::new();
         let mut counts: HashMap<u8, usize> = HashMap::new();
 
         for batch in self.dataset.batch_view_iter(100, self.dataset.labels.len()) {
             let images = batch.images_tensor(&self.device)?;
-            let (emb, _) = embed.forward_with_tape(images)?; // (batch, dim)
+            let emb = embed.forward(images)?; // (batch, dim)
 
             for (row_idx, &label) in batch.labels.iter().enumerate() {
                 let row = emb.narrow(0, row_idx, 1)?; // (1, dim)
@@ -193,7 +194,7 @@ impl SiameseCLRTrainStep {
         Ok(centroids)
     }
 
-    pub fn test(&self, embed: &Sequential, testset: DataSet) -> CategoryResult<()> {
+    pub fn test(&self, embed: &mut Sequential, testset: DataSet) -> CategoryResult<()> {
         let centroids = self.compute_class_centroids(embed)?;
 
         let mut total_correct = 0usize;
@@ -201,7 +202,7 @@ impl SiameseCLRTrainStep {
 
         for (batch_idx, batch) in testset.batch_view_iter(100, 10_000).enumerate() {
             let images = batch.images_tensor(&self.device)?;
-            let (emb, _) = embed.forward_with_tape(images)?; // (batch, dim)
+            let emb = embed.forward(images)?; // (batch, dim)
             let batch_size = emb.dim(0)?;
 
             let mut correct_in_batch = 0usize;

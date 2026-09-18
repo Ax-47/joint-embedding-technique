@@ -14,7 +14,7 @@ fn sgd_step(
     grads: &[LinearLayerParams],
     lr: f64,
 ) -> CategoryResult<Vec<LinearLayerParams>> {
-    let mut new_params = Vec::with_capacity(params.len() + grads.len());
+    let mut new_params = Vec::with_capacity(params.len());
     for (param, grad) in params.iter().zip(grads) {
         new_params.push(LinearLayerParams {
             weight_matrix: (&param.weight_matrix - (lr * &grad.weight_matrix)?)?,
@@ -47,12 +47,11 @@ impl TrainStep {
             {
                 let x = batch.images_tensor(&self.device)?;
                 let y = batch.label_one_hot_tensor(&self.device)?;
-                dense.currying();
-                let (last_out, all_outs) = dense.forward_with_tape(x)?;
+
+                let last_out = dense.forward(x)?;
                 let loss = Loss.apply((last_out.clone(), y.clone()))?;
                 let delta = DerivativeLoss.apply((last_out, y))?;
-                let grads = dense.backward(all_outs, delta)?;
-
+                let grads = dense.backward(delta)?;
                 let new_params = sgd_step(&dense.params(), &grads, self.learning_rate)?;
                 dense.set_params(new_params);
 
@@ -68,17 +67,17 @@ impl TrainStep {
         }
         Ok(())
     }
-    pub fn test(&self, dense: &Sequential, testset: DataSet) -> CategoryResult<()> {
+    pub fn test(&self, dense: &mut Sequential, testset: DataSet) -> CategoryResult<()> {
         let mut total_correct = 0usize;
         let mut total_samples = 0usize;
 
         for (batch_idx, batch) in testset.batch_view_iter(100, 10_000).enumerate() {
             let images = batch.images_tensor(&self.device)?;
-            let label_idx = batch.labels_u32_tensor(&self.device)?; // class index ไม่ใช่ one-hot
+            let label_idx = batch.labels_u32_tensor(&self.device)?;
 
-            let batch_size = images.dim(0)?; // เก็บไว้ก่อนโดน move เข้า forward
+            let batch_size = images.dim(0)?;
 
-            let (last_out, _) = dense.forward_with_tape(images)?;
+            let last_out = dense.forward(images)?;
 
             let predicted = last_out.argmax(1)?;
             let matches = predicted.eq(&label_idx)?;

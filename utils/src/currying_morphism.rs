@@ -15,6 +15,7 @@ pub trait CurryingMorphism {
 pub trait DerivatibleCurryingMorphism {
     type Params;
     type Input;
+    type Curry;
     type Output;
 
     type DerivativeInput;
@@ -26,6 +27,7 @@ pub trait DerivatibleCurryingMorphism {
         dyn DerivatibleMorphism<
                 Self::Input,
                 Self::Output,
+                Self::Curry,
                 Self::DerivativeInput,
                 Self::DerivativeOutput,
             >,

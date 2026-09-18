@@ -34,12 +34,10 @@ pub fn train_siamese_clr() -> Result<(), Box<dyn std::error::Error>> {
     dense.init_params(device.clone())?;
     let learning_rate = 0.01;
     let batch_size = 64;
-    let train = SiameseCLRTrainStep::new(dataset, learning_rate, batch_size, (5, 5), device);
-    for _ in 0..10 {
-        train.train(&mut dense)?;
-    }
+    let train = SiameseCLRTrainStep::new(dataset, learning_rate, batch_size, (15, 15), device);
+    train.train(&mut dense)?;
 
-    train.test(&dense, testset.clone())?;
-    train.export_embeddings_2d(&dense, &testset, 10000, "output/embeddings_2d.csv")?;
+    train.test(&mut dense, testset.clone())?;
+    train.export_embeddings_2d(&mut dense, &testset, 10000, "output/embeddings_2d.csv")?;
     Ok(())
 }

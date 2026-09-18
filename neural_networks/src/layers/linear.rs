@@ -1,4 +1,4 @@
-use candle_core::{DType, Device, Tensor};
+use candle_core::Tensor;
 use std::rc::Rc;
 use utils::currying_morphism::DerivatibleCurryingMorphism;
 use utils::derivative::DerivatibleMorphism;
@@ -37,8 +37,8 @@ impl DerivatibleCurryingMorphism for LinearLayer {
     type Params = LinearLayerParams;
     type Input = Tensor;
     type Output = Tensor;
-
-    type DerivativeInput = (Tensor, Tensor);
+    type Curry = Tensor;
+    type DerivativeInput = Tensor;
     type DerivativeOutput = (LinearLayerParams, Tensor);
     fn curry(
         &self,
@@ -47,6 +47,7 @@ impl DerivatibleCurryingMorphism for LinearLayer {
         dyn DerivatibleMorphism<
                 Self::Input,
                 Self::Output,
+                Self::Curry,
                 Self::DerivativeInput,
                 Self::DerivativeOutput,
             >,
@@ -71,24 +72,22 @@ impl Morphism for AppliedLinearLayer {
 
 pub struct DerivativeLinearLayer {
     pub params: LinearLayerParams,
+    pub output: Tensor,
 }
 impl Morphism for DerivativeLinearLayer {
-    type Input = (Tensor, Tensor);
+    type Input = Tensor;
     type Output = (LinearLayerParams, Tensor);
     fn name(&self) -> &'static str {
-        "derivative linear layer"
+        "derivative linear layer "
     }
-    fn apply(
-        &self,
-        (input, grad_output): Self::Input,
-    ) -> utils::errors::CategoryResult<Self::Output> {
-        let dw = input.t()?.matmul(&grad_output)?;
+    fn apply(&self, grad_output: Self::Input) -> utils::errors::CategoryResult<Self::Output> {
+        let dw = &self.output.t()?.matmul(&grad_output)?;
         let db = grad_output.sum(0)?;
         let da = grad_output.matmul(&self.params.weight_matrix.t()?)?;
 
         Ok((
             LinearLayerParams {
-                weight_matrix: dw,
+                weight_matrix: dw.clone(),
                 bias_matrix: db,
             },
             da,
@@ -97,11 +96,16 @@ impl Morphism for DerivativeLinearLayer {
 }
 
 impl DerivativeMorphism for AppliedLinearLayer {
-    type Input = (Tensor, Tensor);
+    type Input = Tensor;
+    type Curry = Tensor;
     type Output = (LinearLayerParams, Tensor);
-    fn derivative(&self) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
+    fn derivative(
+        &self,
+        output: Self::Curry,
+    ) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
         Rc::new(DerivativeLinearLayer {
             params: self.params.clone(),
+            output,
         })
     }
 }

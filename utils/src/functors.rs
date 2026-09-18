@@ -100,19 +100,21 @@ where
 
 impl<MPhism, Input, Output> DerivativeMorphism for CollectionFunctor<MPhism, Input, Output>
 where
-    MPhism: DerivativeMorphism + Sized + 'static,
+    MPhism: DerivativeMorphism<Output = Output> + Sized + 'static,
     MPhism::Input: 'static,
     MPhism::Output: 'static,
     Input: Collection<Item = MPhism::Input> + 'static,
     Output: Rebuild<MPhism::Output, Shape = Input::Shape> + 'static,
 {
     type Input = Input;
+    type Curry = MPhism::Curry;
     type Output = Output;
 
     fn derivative(
         &self,
+        input: Self::Curry,
     ) -> std::rc::Rc<dyn Morphism<Input = Self::Input, Output = Self::Output> + 'static> {
-        Rc::new(CollectionFunctor::new(self.morphism.derivative()))
+        Rc::new(CollectionFunctor::new(self.morphism.derivative(input)))
     }
 }
 

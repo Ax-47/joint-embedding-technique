@@ -35,7 +35,7 @@ fn add_params(
     Ok(summed)
 }
 
-pub struct SiameseTrainStep {
+pub struct BarlowTrainStep {
     dataset: DataSet,
     learning_rate: f64,
     batch_size: usize,
@@ -43,35 +43,7 @@ pub struct SiameseTrainStep {
     device: Device,
 }
 
-impl SiameseTrainStep {
-    pub fn export_embeddings_2d(
-        &self,
-        embed: &mut Sequential,
-        dataset: &DataSet,
-        limit: usize,
-        out_path: &str,
-    ) -> CategoryResult<()> {
-        let mut all_embs: Vec<Vec<f32>> = Vec::new();
-        let mut all_labels: Vec<u8> = Vec::new();
-
-        for batch in dataset.batch_view_iter(200, limit) {
-            let images = batch.images_tensor(&self.device)?;
-            let emb = embed.forward(images)?; // (batch, dim)
-            let emb_vec: Vec<Vec<f32>> = emb.to_vec2()?;
-            all_embs.extend(emb_vec);
-            all_labels.extend(batch.labels.iter().copied());
-        }
-
-        let points_2d = pca_2d(&all_embs);
-
-        let mut file = std::fs::File::create(out_path).expect("สร้างไฟล์ output ไม่ได้");
-        writeln!(file, "x,y,label").ok();
-        for ((x, y), label) in points_2d.iter().zip(all_labels.iter()) {
-            writeln!(file, "{},{},{}", x, y, label).ok();
-        }
-
-        Ok(())
-    }
+impl BarlowTrainStep {
     pub fn new(
         dataset: DataSet,
         learning_rate: f64,
@@ -90,27 +62,79 @@ impl SiameseTrainStep {
 
     pub fn train(&self, embed: &mut Sequential) -> CategoryResult<()> {
         let steps_per_epoch = self.dataset.labels.len() / self.batch_size;
+        let lambda = 5e-3; // ค่าต้นฉบับ Barlow Twins ใช้ 5e-3
+        let batch_size_f = self.batch_size as f64;
+
         for epoch in 0..10 {
             for step in 0..steps_per_epoch {
+                // pair.left / pair.right คือ augmentation คู่จากรูปเดียวกัน
                 let pair =
                     self.dataset
                         .sample_pairs(self.batch_size, self.cut_shape, &self.device)?;
-                let left_emb = embed.forward(pair.left)?;
-                let right_emb = embed.forward(pair.right)?;
 
-                let diff = (&left_emb - &right_emb)?;
-                let dist_sq = diff.sqr()?.sum_keepdim(1)?;
-                let per_sample_loss = dist_sq.clone();
-                let loss = per_sample_loss.mean_all()?;
+                // Forward ทั้งสองฝั่ง (weights 共享)
+                let z_a = embed.forward(pair.left)?;
+                let z_b = embed.forward(pair.right)?;
 
-                let scale = 2.0 / self.batch_size as f64;
-                let d_diff = diff.affine(scale, 0.0)?;
-                let delta_left = d_diff.clone();
-                let delta_right = d_diff.neg()?;
+                // z_a, z_b shape: [batch_size, num_features]
+                // 1. Center ตาม batch dimension (dim=0)
+                let mean_a = z_a.mean_keepdim(0)?; // [1, D]
+                let mean_b = z_b.mean_keepdim(0)?; // [1, D]
 
-                let grads_left = embed.backward(delta_left)?;
-                let grads_right = embed.backward(delta_right)?;
-                let grads = add_params(&grads_left, &grads_right)?;
+                let za_c = z_a.broadcast_sub(&mean_a)?; // [N, D]
+                let zb_c = z_b.broadcast_sub(&mean_b)?; // [N, D]
+
+                // 2. Cross-covariance matrix C = (Z_a^T @ Z_b) / N
+                // shape: [D, D]
+                let c = za_c.t()?.matmul(&zb_c)?;
+                let c = c.affine(1.0 / batch_size_f, 0.0)?;
+
+                // 3. Barlow Twins Loss
+                let num_features = z_a.dim(1)?;
+                let identity = Tensor::eye(num_features, z_a.dtype(), &self.device)?;
+
+                // Invariance: (diag(C) - 1)^2
+                let c_diag = c.broadcast_mul(&identity)?; // zero out off-diagonal
+                let invariance = c_diag.sub(&identity)?.sqr()?.sum_all()?;
+
+                // Redundancy: sum of off-diagonal squared
+                let c_sq = c.sqr()?;
+                let total_sq = c_sq.sum_all()?;
+                let diag_sq = c_diag.sqr()?.sum_all()?;
+                let redundancy = total_sq.sub(&diag_sq)?;
+
+                let loss = invariance.add(&redundancy.affine(lambda, 0.0)?)?;
+
+                // 4. Manual backward: คำนวณ gradient ของ loss w.r.t z_a, z_b
+                // สร้าง matrix M ที่ dL/dC = M
+                // M_ii = 2(C_ii - 1), M_ij = 2*lambda*C_ij (i≠j)
+                let off_diag_mask = {
+                    let ones = Tensor::ones_like(&c)?;
+                    ones.sub(&identity)?
+                };
+
+                let m_diag = c_diag.sub(&identity)?.affine(2.0, 0.0)?;
+                let m_offdiag = c.broadcast_mul(&off_diag_mask)?.affine(2.0 * lambda, 0.0)?;
+                let m = m_diag.add(&m_offdiag)?; // [D, D]
+
+                // dL/dza_c = (1/N) * zb_c @ M^T
+                // dL/dzb_c = (1/N) * za_c @ M
+                let scale = 1.0 / batch_size_f;
+                let dza_c = zb_c.matmul(&m.t()?)?.affine(scale, 0.0)?;
+                let dzb_c = za_c.matmul(&m)?.affine(scale, 0.0)?;
+
+                // 5. Backprop through centering: za_c = za - mean(za)
+                // dL/dza = dL/dza_c - mean(dL/dza_c)
+                let mean_dza = dza_c.mean_keepdim(0)?;
+                let delta_a = dza_c.broadcast_sub(&mean_dza)?;
+
+                let mean_dzb = dzb_c.mean_keepdim(0)?;
+                let delta_b = dzb_c.broadcast_sub(&mean_dzb)?;
+
+                // 6. Backprop through encoder
+                let grads_a = embed.backward(delta_a)?;
+                let grads_b = embed.backward(delta_b)?;
+                let grads = add_params(&grads_a, &grads_b)?;
 
                 let new_params = sgd_step(&embed.params(), &grads, self.learning_rate)?;
                 embed.set_params(new_params);
@@ -194,6 +218,34 @@ impl SiameseTrainStep {
 
         let accuracy = total_correct as f64 / total_samples as f64 * 100.0;
         println!("Accuracy = {:.2}%", accuracy);
+        Ok(())
+    }
+    pub fn export_embeddings_2d(
+        &self,
+        embed: &mut Sequential,
+        dataset: &DataSet,
+        limit: usize,
+        out_path: &str,
+    ) -> CategoryResult<()> {
+        let mut all_embs: Vec<Vec<f32>> = Vec::new();
+        let mut all_labels: Vec<u8> = Vec::new();
+
+        for batch in dataset.batch_view_iter(200, limit) {
+            let images = batch.images_tensor(&self.device)?;
+            let emb = embed.forward(images)?; // (batch, dim)
+            let emb_vec: Vec<Vec<f32>> = emb.to_vec2()?;
+            all_embs.extend(emb_vec);
+            all_labels.extend(batch.labels.iter().copied());
+        }
+
+        let points_2d = pca_2d(&all_embs);
+
+        let mut file = std::fs::File::create(out_path).expect("สร้างไฟล์ output ไม่ได้");
+        writeln!(file, "x,y,label").ok();
+        for ((x, y), label) in points_2d.iter().zip(all_labels.iter()) {
+            writeln!(file, "{},{},{}", x, y, label).ok();
+        }
+
         Ok(())
     }
 }
