@@ -7,17 +7,24 @@ use neural_networks::{
 };
 use std::rc::Rc;
 
-use crate::mlp::train::TrainStep;
+use crate::siamese_net::train::SiameseTrainStep;
 pub(crate) mod train;
 pub fn train_siamese_net() -> Result<(), Box<dyn std::error::Error>> {
     let dataset = DataSet::new(
         "MNIST/train-images-idx3-ubyte",
         "MNIST/train-labels-idx1-ubyte",
     )?;
+
+    let testset = DataSet::new(
+        "MNIST/t10k-images-idx3-ubyte",
+        "MNIST/t10k-labels-idx1-ubyte",
+    )?;
     let relu = Rc::new(Relu);
 
     let mut dense = Sequential::new(&[
         Layer::CurryingMorphism(Rc::new(LinearLayer::new(784, 64))),
+        Layer::Morphism(relu.clone()),
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 64))),
         Layer::Morphism(relu.clone()),
         Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 64))),
         Layer::Morphism(relu.clone()),
@@ -27,7 +34,12 @@ pub fn train_siamese_net() -> Result<(), Box<dyn std::error::Error>> {
     dense.init_params(device.clone())?;
     let learning_rate = 0.01;
     let batch_size = 64;
-    let train = TrainStep::new(dataset, learning_rate, batch_size, device);
-    train.train(&mut dense)?;
+    let train = SiameseTrainStep::new(dataset, learning_rate, batch_size, (5, 5), device);
+    for _ in 0..2 {
+        train.train(&mut dense)?;
+    }
+
+    train.test(&dense, testset.clone())?;
+    train.export_embeddings_2d(&dense, &testset, 2000, "output/embeddings_2d.csv")?;
     Ok(())
 }

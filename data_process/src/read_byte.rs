@@ -1,12 +1,15 @@
-use candle_core::{Device, Tensor};
+use candle_core::{Device, Tensor}; //read_byte.rs
 use ndarray::s;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Result};
-
+#[derive(Clone)]
 pub struct DataSet {
     pub labels: Array1<u8>,
     pub images: Array2<u8>,
+    pub image_shape: (usize, usize), // (rows, cols)
+    pub(crate) by_label: HashMap<u8, Vec<usize>>,
 }
 
 pub struct BatchView<'a> {
@@ -42,24 +45,43 @@ impl<'a> BatchView<'a> {
         Tensor::from_vec(buf, self.labels.len(), device)
     }
 }
+
 impl DataSet {
     pub fn new(image_path: &str, label_path: &str) -> Result<Self> {
-        let images = Self::load_images_ndarray(image_path)?;
+        let (images, image_shape) = Self::load_images_ndarray(image_path)?;
         let labels = Self::load_labels(label_path)?;
 
         assert_eq!(images.nrows(), labels.len());
 
-        Ok(Self { images, labels })
+        let by_label = Self::build_by_label(&labels);
+
+        Ok(Self {
+            images,
+            labels,
+            image_shape,
+            by_label,
+        })
     }
+
+    fn build_by_label(labels: &Array1<u8>) -> HashMap<u8, Vec<usize>> {
+        let mut by_label: HashMap<u8, Vec<usize>> = HashMap::new();
+        for (i, &l) in labels.iter().enumerate() {
+            by_label.entry(l).or_default().push(i);
+        }
+        by_label
+    }
+
     fn read_u32_be(buf: &[u8]) -> u32 {
         u32::from_be_bytes(buf.try_into().unwrap())
     }
+
     fn get_buf_from_file(path: &str) -> Result<Vec<u8>> {
         let mut file = File::open(path)?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         Ok(buf)
     }
+
     fn load_labels(path: &str) -> Result<Array1<u8>> {
         let buf = Self::get_buf_from_file(path)?;
 
@@ -70,7 +92,8 @@ impl DataSet {
         let arr = Array1::from_vec(buf[8..8 + num].to_vec());
         Ok(arr)
     }
-    fn load_images_ndarray(path: &str) -> Result<Array2<u8>> {
+
+    fn load_images_ndarray(path: &str) -> Result<(Array2<u8>, (usize, usize))> {
         let buf = Self::get_buf_from_file(path)?;
 
         let magic = Self::read_u32_be(&buf[0..4]);
@@ -85,8 +108,10 @@ impl DataSet {
 
         let data = &buf[offset..offset + num * image_size];
 
-        Ok(Array2::from_shape_vec((num, image_size), data.to_vec()).unwrap())
+        let arr = Array2::from_shape_vec((num, image_size), data.to_vec()).unwrap();
+        Ok((arr, (rows, cols)))
     }
+
     pub fn batch_view_iter(
         &self,
         batch_size: usize,
