@@ -1,11 +1,11 @@
-use candle_core::{Device, Tensor};
+use candle_core::{DType, Device, Tensor};
 use data_process::read_byte::DataSet;
 use neural_networks::{container::sequential::Sequential, layers::linear::LinearLayerParams};
 use std::collections::HashMap;
 use std::io::Write;
 
 use utils::errors::CategoryResult;
-
+const EPS_LOG: f64 = 1e-8;
 fn sgd_step(
     params: &[LinearLayerParams],
     grads: &[LinearLayerParams],
@@ -35,15 +35,16 @@ fn add_params(
     Ok(summed)
 }
 
-pub struct SiameseTrainStep {
+pub struct SiameseCLRTrainStep {
     dataset: DataSet,
     learning_rate: f64,
     batch_size: usize,
     cut_shape: (usize, usize),
+    temperature: f64,
     device: Device,
 }
 
-impl SiameseTrainStep {
+impl SiameseCLRTrainStep {
     pub fn export_embeddings_2d(
         &self,
         embed: &Sequential,
@@ -84,32 +85,72 @@ impl SiameseTrainStep {
             learning_rate,
             batch_size,
             cut_shape,
+            temperature: 0.5,
             device,
         }
     }
 
     pub fn train(&self, embed: &mut Sequential) -> CategoryResult<()> {
         let steps_per_epoch = self.dataset.labels.len() / self.batch_size;
+        let b = self.batch_size;
+        let two_b = 2 * b;
+
         for epoch in 0..10 {
             for step in 0..steps_per_epoch {
-                let pair =
-                    self.dataset
-                        .sample_pairs(self.batch_size, self.cut_shape, &self.device)?;
-                embed.currying();
-                let (left_emb, left_outs) = embed.forward_with_tape(pair.left)?;
+                let views = self.dataset.sample_views(b, self.cut_shape, &self.device)?;
 
                 embed.currying();
-                let (right_emb, right_outs) = embed.forward_with_tape(pair.right)?;
+                let (left_emb, left_outs) = embed.forward_with_tape(views.left)?;
+                embed.currying();
+                let (right_emb, right_outs) = embed.forward_with_tape(views.right)?;
 
-                let diff = (&left_emb - &right_emb)?;
-                let dist_sq = diff.sqr()?.sum_keepdim(1)?;
-                let per_sample_loss = dist_sq.clone();
-                let loss = per_sample_loss.mean_all()?;
+                // รวมเป็น (2B, dim): แถว 0..B = left view, แถว B..2B = right view
+                let all_emb = Tensor::cat(&[&left_emb, &right_emb], 0)?;
 
-                let scale = 2.0 / self.batch_size as f64;
-                let d_diff = diff.affine(scale, 0.0)?;
-                let delta_left = d_diff.clone();
-                let delta_right = d_diff.neg()?;
+                // L2 normalize แต่ละแถว (cosine similarity ต้องการเวกเตอร์หนึ่งหน่วย)
+                let norm = all_emb.sqr()?.sum_keepdim(1)?.sqrt()?; // (2B, 1)
+                let z = all_emb.broadcast_div(&norm)?; // (2B, dim)
+
+                // similarity matrix (2B, 2B) = z @ z^T / temperature
+                let sim = z.matmul(&z.t()?)?.affine(1.0 / self.temperature, 0.0)?;
+
+                // มาสก์ diagonal เป็น -inf กัน anchor เทียบกับตัวเอง
+                let neg_inf_diag =
+                    Tensor::eye(two_b, DType::F32, &self.device)?.affine(-1e9, 0.0)?;
+                let sim_masked = (&sim + &neg_inf_diag)?;
+
+                // softmax ต่อแถว (numerically stable)
+                let sim_max = sim_masked.max_keepdim(1)?;
+                let exp_sim = sim_masked.broadcast_sub(&sim_max)?.exp()?;
+                let sum_exp = exp_sim.sum_keepdim(1)?;
+                let p = exp_sim.broadcast_div(&sum_exp)?; // (2B, 2B)
+
+                // positive index ของแถว i คือ (i+B) mod 2B (คู่ view เดียวกัน)
+                let mut onehot_buf = vec![0f32; two_b * two_b];
+                for i in 0..two_b {
+                    onehot_buf[i * two_b + (i + b) % two_b] = 1.0;
+                }
+                let onehot = Tensor::from_vec(onehot_buf, (two_b, two_b), &self.device)?;
+
+                // loss สำหรับ log
+                let log_p_pos = (&p * &onehot)?.sum(1)?.affine(1.0, EPS_LOG)?.log()?;
+                let loss = log_p_pos.neg()?.mean_all()?;
+
+                // --- backward แบบ derive มือ (standard softmax-CE gradient) ---
+                // dL/dS = (P - onehot) / (2B)
+                let g = (&p - &onehot)?.affine(1.0 / two_b as f64, 0.0)?;
+                let g_sym = (&g + &g.t()?)?;
+
+                // dL/dz = (1/tau) * (G + G^T) @ Z
+                let dz = g_sym.matmul(&z)?.affine(1.0 / self.temperature, 0.0)?;
+
+                // backprop ผ่าน L2 normalize: de = (dz - z*(z·dz)) / ||e||
+                let dot = (&z * &dz)?.sum_keepdim(1)?;
+                let correction = z.broadcast_mul(&dot)?;
+                let de = (&dz - &correction)?.broadcast_div(&norm)?; // (2B, dim)
+
+                let delta_left = de.narrow(0, 0, b)?;
+                let delta_right = de.narrow(0, b, b)?;
 
                 let grads_left = embed.backward(left_outs, delta_left)?;
                 let grads_right = embed.backward(right_outs, delta_right)?;

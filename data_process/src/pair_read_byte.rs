@@ -7,7 +7,10 @@ pub struct PairBatch {
     pub right: Tensor,
     pub labels: Tensor,
 }
-
+pub struct ViewBatch {
+    pub left: Tensor,  // (batch, img_h*img_w)
+    pub right: Tensor, // (batch, img_h*img_w)
+}
 impl DataSet {
     pub fn sample_pairs(
         &self,
@@ -61,6 +64,22 @@ impl DataSet {
             right,
             labels,
         })
+    }
+    pub fn sample_views(
+        &self,
+        batch_size: usize,
+        cut_shape: (usize, usize),
+        device: &Device,
+    ) -> candle_core::Result<ViewBatch> {
+        let mut rng = rand::rng();
+        let n = self.labels.len();
+
+        let idx: Vec<usize> = (0..batch_size).map(|_| rng.random_range(0..n)).collect();
+
+        let left = self.cutout_images_by_index(&idx, cut_shape, device)?;
+        let right = self.cutout_images_by_index(&idx, cut_shape, device)?;
+
+        Ok(ViewBatch { left, right })
     }
 
     fn cutout_images_by_index(
