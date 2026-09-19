@@ -61,7 +61,7 @@ impl TrainStep {
                 let loss = Loss.apply((last_out.clone(), y.clone()))?;
                 let delta = DerivativeLoss.apply((last_out, y))?;
                 let grads = dense.backward(delta)?;
-                let new_params = sgd_all(&dense.params(), &grads, self.learning_rate)?;
+                let new_params = sgd_all(dense.params(), &grads, self.learning_rate)?;
                 dense.set_params(new_params);
 
                 if batch_idx % 100 == 0 {

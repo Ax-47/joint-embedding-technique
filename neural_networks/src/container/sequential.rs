@@ -80,9 +80,11 @@ impl Sequential {
         self.derivative_dense.clear();
     }
 
-    pub fn forward(&mut self, input: V) -> CategoryResult<Tensor> {
-        self.derivative_dense.clear();
-        self.derivative_dense.reserve(self.layers.len());
+    pub fn forward_with_tape(
+        &mut self,
+        input: V,
+    ) -> CategoryResult<(Tensor, Vec<DerivativedLayer>)> {
+        let mut tape = Vec::with_capacity(self.layers.len());
 
         let mut output = input;
         let mut params_iter = self.params.iter();
@@ -97,18 +99,16 @@ impl Sequential {
                     let morphism = currying.curry(params);
                     let layer_input = output;
 
-                    // เก็บ tape ด้วย input (ไม่ใช่ output) → backward ถูกต้อง
-                    self.derivative_dense
-                        .push(DerivativedLayer::CurryingMorphism(
-                            morphism.derivative(layer_input.clone()),
-                        ));
+                    tape.push(DerivativedLayer::CurryingMorphism(
+                        morphism.derivative(layer_input.clone()),
+                    ));
 
                     output = morphism.apply(layer_input)?;
                 }
                 Layer::Morphism(morphism) => {
                     let layer_input = output;
 
-                    self.derivative_dense.push(DerivativedLayer::Morphism(
+                    tape.push(DerivativedLayer::Morphism(
                         morphism.derivative(layer_input.clone()),
                     ));
 
@@ -117,20 +117,22 @@ impl Sequential {
             }
         }
 
-        Ok(output)
+        Ok((output, tape))
     }
 
-    pub fn backward(&mut self, mut grad: Tensor) -> CategoryResult<Vec<ParamSet>> {
-        let tapes = std::mem::take(&mut self.derivative_dense);
-
-        let currying_count = tapes
+    pub fn backward_with_tape(
+        &mut self,
+        tape: Vec<DerivativedLayer>,
+        mut grad: Tensor,
+    ) -> CategoryResult<Vec<ParamSet>> {
+        let currying_count = tape
             .iter()
             .filter(|layer| matches!(layer, DerivativedLayer::CurryingMorphism(_)))
             .count();
 
         let mut gradients = Vec::with_capacity(currying_count);
 
-        for layer in tapes.into_iter().rev() {
+        for layer in tape.into_iter().rev() {
             match layer {
                 DerivativedLayer::CurryingMorphism(derivative) => {
                     let (layer_grad, input_grad) = derivative.apply(grad)?;
@@ -145,6 +147,17 @@ impl Sequential {
 
         gradients.reverse();
         Ok(gradients)
+    }
+
+    pub fn forward(&mut self, input: V) -> CategoryResult<Tensor> {
+        let (output, tape) = self.forward_with_tape(input)?;
+        self.derivative_dense = tape;
+        Ok(output)
+    }
+
+    pub fn backward(&mut self, grad: Tensor) -> CategoryResult<Vec<ParamSet>> {
+        let tapes = std::mem::take(&mut self.derivative_dense);
+        self.backward_with_tape(tapes, grad)
     }
 }
 impl Monoid for Sequential {

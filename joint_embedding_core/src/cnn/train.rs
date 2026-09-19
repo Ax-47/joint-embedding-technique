@@ -70,20 +70,14 @@ impl TrainStep {
             {
                 let images = batch.images_tensor(&self.device)?;
                 let images = self.images_for_cnn(images)?;
-
                 let targets = batch.label_one_hot_tensor(&self.device)?;
 
-                // logits: [N, 10]
                 let logits = network.forward(images)?;
-
                 let loss = Loss.apply((logits.clone(), targets.clone()))?;
 
                 let grad_logits = DerivativeLoss.apply((logits, targets))?;
-
                 let grads = network.backward(grad_logits)?;
-
                 let new_params = sgd_all(network.params(), &grads, self.learning_rate)?;
-
                 network.set_params(new_params);
 
                 if batch_idx % 100 == 0 {

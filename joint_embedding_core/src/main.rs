@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // train_mlp()?;
     // train_siamese_net()?;
     // train_siamese_clr()?;
-    // train_barlow()?;
-    train_cnn()?;
+    train_barlow()?;
+    // train_cnn()?;
     Ok(())
 }

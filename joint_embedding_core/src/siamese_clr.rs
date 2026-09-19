@@ -7,7 +7,7 @@ use neural_networks::{
 };
 use std::rc::Rc;
 
-use crate::{siamese_clr::train::SiameseCLRTrainStep, siamese_net::train::SiameseTrainStep};
+use crate::siamese_clr::train::SiameseCLRTrainStep;
 pub(crate) mod train;
 pub fn train_siamese_clr() -> Result<(), Box<dyn std::error::Error>> {
     let dataset = DataSet::new(

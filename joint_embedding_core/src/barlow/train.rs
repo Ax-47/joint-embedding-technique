@@ -80,8 +80,8 @@ impl BarlowTrainStep {
                         .sample_pairs(self.batch_size, self.cut_shape, &self.device)?;
 
                 // Forward ทั้งสองฝั่ง (weights 共享)
-                let z_a = embed.forward(pair.left)?;
-                let z_b = embed.forward(pair.right)?;
+                let (z_a, tape_a) = embed.forward_with_tape(pair.left)?;
+                let (z_b, tape_b) = embed.forward_with_tape(pair.right)?;
 
                 // z_a, z_b shape: [batch_size, num_features]
                 // 1. Center ตาม batch dimension (dim=0)
@@ -139,8 +139,8 @@ impl BarlowTrainStep {
                 let delta_b = dzb_c.broadcast_sub(&mean_dzb)?;
 
                 // 6. Backprop through encoder
-                let grads_a = embed.backward(delta_a)?;
-                let grads_b = embed.backward(delta_b)?;
+                let grads_a = embed.backward_with_tape(tape_a, delta_a)?;
+                let grads_b = embed.backward_with_tape(tape_b, delta_b)?;
                 let grads = add_all(&grads_a, &grads_b)?;
 
                 let new_params = sgd_all(embed.params(), &grads, self.learning_rate)?;

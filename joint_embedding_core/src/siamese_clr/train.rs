@@ -161,7 +161,7 @@ impl SiameseCLRTrainStep {
                 let grads_right = embed.backward(delta_right)?;
                 let grads = add_all(&grads_left, &grads_right)?;
 
-                let new_params = sgd_all(&embed.params(), &grads, self.learning_rate)?;
+                let new_params = sgd_all(embed.params(), &grads, self.learning_rate)?;
                 embed.set_params(new_params);
 
                 if step % 100 == 0 {

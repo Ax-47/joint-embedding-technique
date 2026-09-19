@@ -6,6 +6,7 @@ use neural_networks::{
     layers::linear::LinearLayer,
 };
 use std::rc::Rc;
+use utils::monoid::Monoid;
 
 use crate::barlow::train::BarlowTrainStep;
 pub(crate) mod train;
@@ -21,31 +22,30 @@ pub fn train_barlow() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let relu = Rc::new(Relu);
 
-    let mut dense = Sequential::new(&[
-        Layer::CurryingMorphism(Rc::new(LinearLayer::new(784, 64))),
+    let encoder = Sequential::new(&[
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(784, 128))),
         Layer::Morphism(relu.clone()),
-        Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 64))),
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(128, 128))),
         Layer::Morphism(relu.clone()),
-        Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 64))),
-        Layer::Morphism(relu.clone()),
-        Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 10))),
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(128, 64))),
     ]);
 
-    let mut projector = Sequential::new(&[
-        Layer::CurryingMorphism(Rc::new(LinearLayer::new(10, 6))),
+    // Projector:
+    // [N, 64] -> [N, 128] -> [N, 128] -> [N, 64]
+    let projector = Sequential::new(&[
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(64, 128))),
         Layer::Morphism(relu.clone()),
-        Layer::CurryingMorphism(Rc::new(LinearLayer::new(6, 7))),
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(128, 128))),
         Layer::Morphism(relu.clone()),
-        Layer::CurryingMorphism(Rc::new(LinearLayer::new(7, 10))),
+        Layer::CurryingMorphism(Rc::new(LinearLayer::new(128, 64))),
     ]);
+    let mut dense = encoder.combine(&projector);
     let device = Device::cuda_if_available(0)?;
     dense.init_params(&device)?;
-    let learning_rate = 0.01;
+    let learning_rate = 0.001;
     let batch_size = 64;
     let train = BarlowTrainStep::new(dataset, learning_rate, batch_size, (5, 5), device);
-    for _ in 0..10 {
-        train.train(&mut dense)?;
-    }
+    train.train(&mut dense)?;
 
     train.test(&mut dense, testset.clone())?;
     train.export_embeddings_2d(&mut dense, &testset, 10000, "output/embeddings_2d.csv")?;
