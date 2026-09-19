@@ -1,6 +1,9 @@
 use candle_core::{Device, Tensor}; //read_byte.rs
-use ndarray::s;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+use ndarray::{Axis, s};
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
+use rand::{RngExt, SeedableRng};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Result};
@@ -63,6 +66,23 @@ impl DataSet {
         })
     }
 
+    pub fn shuffle(&mut self) {
+        self.shuffle_with_rng(&mut rand::rng());
+    }
+
+    pub fn shuffle_with_seed(&mut self, seed: u64) {
+        self.shuffle_with_rng(&mut StdRng::seed_from_u64(seed));
+    }
+
+    fn shuffle_with_rng(&mut self, rng: &mut impl rand::Rng) {
+        let n = self.labels.len();
+        let mut idx: Vec<usize> = (0..n).collect();
+        idx.shuffle(rng);
+
+        self.images = self.images.select(Axis(0), &idx);
+        self.labels = Array1::from_vec(idx.iter().map(|&i| self.labels[i]).collect());
+        self.by_label = Self::build_by_label(&self.labels);
+    }
     fn build_by_label(labels: &Array1<u8>) -> HashMap<u8, Vec<usize>> {
         let mut by_label: HashMap<u8, Vec<usize>> = HashMap::new();
         for (i, &l) in labels.iter().enumerate() {

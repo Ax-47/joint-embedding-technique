@@ -8,12 +8,26 @@ use neural_networks::{
         flatten::FlattenLayer,
         linear::LinearLayer,
         maxpool2d::MaxPool2dLayer,
+        param_set::ParamSet,
     },
 };
-use std::rc::Rc;
+use std::{path::Path, rc::Rc};
+use utils::errors::CategoryResult;
 
 pub(crate) mod train;
 use crate::cnn::train::TrainStep;
+
+pub fn save_params_npy(params: &[ParamSet], output_dir: &str) -> CategoryResult<()> {
+    let dir = Path::new(output_dir);
+    std::fs::create_dir_all(dir)?;
+
+    for (layer_index, ps) in params.iter().enumerate() {
+        ps.save_npy(dir, layer_index)?;
+    }
+
+    println!("บันทึก parameters {} layers ไปที่ {}", params.len(), output_dir);
+    Ok(())
+}
 pub fn train_cnn() -> Result<(), Box<dyn std::error::Error>> {
     let dataset = DataSet::new(
         "MNIST/train-images-idx3-ubyte",
@@ -55,12 +69,14 @@ pub fn train_cnn() -> Result<(), Box<dyn std::error::Error>> {
 
     let device = Device::cuda_if_available(0)?;
     net.init_params(&device)?;
-
     let learning_rate = 0.001;
     let batch_size = 64;
 
-    let train = TrainStep::new(dataset, learning_rate, batch_size, device);
-    train.train(&mut net)?;
+    let mut train = TrainStep::new(dataset, learning_rate, batch_size, device);
+    for _ in 0..10 {
+        train.train(&mut net)?;
+    }
+    save_params_npy(net.params(), "output/params_cnn")?;
     train.test(&mut net, testset)?;
 
     Ok(())

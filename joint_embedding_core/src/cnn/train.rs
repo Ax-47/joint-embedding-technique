@@ -58,9 +58,10 @@ impl TrainStep {
         images.reshape((batch_size, 1, 28, 28))
     }
 
-    pub fn train(&self, network: &mut Sequential) -> CategoryResult<()> {
+    pub fn train(&mut self, network: &mut Sequential) -> CategoryResult<()> {
         let loss_fn = MSELoss;
         for epoch in 0..10 {
+            &self.dataset.shuffle();
             for (batch_idx, batch) in self
                 .dataset
                 .batch_view_iter(self.batch_size, self.dataset.labels.len())
