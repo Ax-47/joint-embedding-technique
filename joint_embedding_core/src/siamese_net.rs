@@ -3,12 +3,25 @@ use data_process::read_byte::DataSet;
 use neural_networks::{
     activation_functions::Relu,
     container::sequential::{Layer, Sequential},
-    layers::linear::LinearLayer,
+    layers::{linear::LinearLayer, param_set::ParamSet},
 };
-use std::rc::Rc;
+use std::{path::Path, rc::Rc};
+use utils::errors::CategoryResult;
 
 use crate::siamese_net::train::SiameseTrainStep;
 pub(crate) mod train;
+
+pub fn save_params_npy(params: &[ParamSet], output_dir: &str) -> CategoryResult<()> {
+    let dir = Path::new(output_dir);
+    std::fs::create_dir_all(dir)?;
+
+    for (layer_index, ps) in params.iter().enumerate() {
+        ps.save_npy(dir, layer_index)?;
+    }
+
+    println!("บันทึก parameters {} layers ไปที่ {}", params.len(), output_dir);
+    Ok(())
+}
 pub fn train_siamese_net() -> Result<(), Box<dyn std::error::Error>> {
     let dataset = DataSet::new(
         "MNIST/train-images-idx3-ubyte",
@@ -38,8 +51,8 @@ pub fn train_siamese_net() -> Result<(), Box<dyn std::error::Error>> {
     for _ in 0..2 {
         train.train(&mut dense)?;
     }
-
+    save_params_npy(dense.params(), "output/params_siamese_net")?;
     train.test(&mut dense, testset.clone())?;
-    train.export_embeddings_2d(&mut dense, &testset, 2000, "output/embeddings_2d.csv")?;
+    train.export_embeddings_2d(&mut dense, &testset, 10000, "output/embeddings_2d.csv")?;
     Ok(())
 }

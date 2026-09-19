@@ -1,4 +1,4 @@
-use candle_core::{Result, Tensor};
+use candle_core::{DType, Result, Tensor};
 use smallvec::SmallVec;
 
 /// layer ส่วนใหญ่มี weight + bias → 2 slot อยู่บน stack ได้เลย
@@ -39,6 +39,24 @@ impl From<TensorList> for ParamSet {
     }
 }
 impl ParamSet {
+    pub fn save_npy(&self, output_dir: &std::path::Path, layer_index: usize) -> Result<()> {
+        std::fs::create_dir_all(output_dir)?;
+
+        for (param_index, tensor) in self.tensors.iter().enumerate() {
+            let tensor = tensor.to_dtype(DType::F32)?.contiguous()?;
+
+            let tag = match tensor.rank() {
+                2 => "weight".to_string(),
+                1 => "bias".to_string(),
+                _ => format!("param{param_index}"),
+            };
+
+            let file_name = format!("layer_{layer_index:02}_{tag}.npy");
+            tensor.write_npy(output_dir.join(file_name))?;
+        }
+
+        Ok(())
+    }
     pub fn add(&self, other: &Self) -> Result<Self> {
         self.zip_with(other, |a, b| a.add(b))
     }
