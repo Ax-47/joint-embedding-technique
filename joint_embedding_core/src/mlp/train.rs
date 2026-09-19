@@ -1,14 +1,11 @@
 use candle_core::{DType, Device};
 use data_process::read_byte::DataSet;
 use neural_networks::{
-    container::sequential::Sequential,
-    layers::{
-        linear::LinearLayerParams,
-        loss::{DerivativeLoss, Loss},
-        param_set::ParamSet,
-    },
+    container::sequential::Sequential, layers::param_set::ParamSet,
+    loss_functions::mse_loss::MSELoss,
 };
 use utils::{
+    derivative::DerivativeMorphism,
     errors::{CategoryError, CategoryResult},
     morphism::Morphism,
 };
@@ -48,6 +45,7 @@ impl TrainStep {
         }
     }
     pub fn train(&self, dense: &mut Sequential) -> CategoryResult<()> {
+        let loss_fn = MSELoss;
         for epoch in 0..10 {
             for (batch_idx, batch) in self
                 .dataset
@@ -58,8 +56,8 @@ impl TrainStep {
                 let y = batch.label_one_hot_tensor(&self.device)?;
 
                 let last_out = dense.forward(x)?;
-                let loss = Loss.apply((last_out.clone(), y.clone()))?;
-                let delta = DerivativeLoss.apply((last_out, y))?;
+                let loss = loss_fn.apply((last_out.clone(), y.clone()))?;
+                let delta = loss_fn.derivative(()).apply((last_out, y))?;
                 let grads = dense.backward(delta)?;
                 let new_params = sgd_all(dense.params(), &grads, self.learning_rate)?;
                 dense.set_params(new_params);

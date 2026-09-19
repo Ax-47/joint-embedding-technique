@@ -1,14 +1,11 @@
 use candle_core::{DType, Device, Tensor};
 use data_process::read_byte::DataSet;
 use neural_networks::{
-    container::sequential::Sequential,
-    layers::{
-        linear::LinearLayerParams,
-        loss::{DerivativeLoss, Loss},
-        param_set::ParamSet,
-    },
+    container::sequential::Sequential, layers::param_set::ParamSet,
+    loss_functions::mse_loss::MSELoss,
 };
 use utils::{
+    derivative::DerivativeMorphism,
     errors::{CategoryError, CategoryResult},
     morphism::Morphism,
 };
@@ -62,6 +59,7 @@ impl TrainStep {
     }
 
     pub fn train(&self, network: &mut Sequential) -> CategoryResult<()> {
+        let loss_fn = MSELoss;
         for epoch in 0..10 {
             for (batch_idx, batch) in self
                 .dataset
@@ -71,12 +69,10 @@ impl TrainStep {
                 let images = batch.images_tensor(&self.device)?;
                 let images = self.images_for_cnn(images)?;
                 let targets = batch.label_one_hot_tensor(&self.device)?;
-
                 let logits = network.forward(images)?;
-                let loss = Loss.apply((logits.clone(), targets.clone()))?;
-
-                let grad_logits = DerivativeLoss.apply((logits, targets))?;
-                let grads = network.backward(grad_logits)?;
+                let loss = loss_fn.apply((logits.clone(), targets.clone()))?;
+                let delta = loss_fn.derivative(()).apply((logits, targets))?;
+                let grads = network.backward(delta)?;
                 let new_params = sgd_all(network.params(), &grads, self.learning_rate)?;
                 network.set_params(new_params);
 

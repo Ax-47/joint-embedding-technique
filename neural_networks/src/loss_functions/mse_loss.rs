@@ -1,9 +1,11 @@
-use candle_core::{DType, Device, Tensor};
-use utils::{errors::CategoryResult, morphism::Morphism};
+use std::rc::Rc;
 
-pub struct Loss;
+use candle_core::Tensor;
+use utils::{derivative::DerivativeMorphism, errors::CategoryResult, morphism::Morphism};
 
-impl Morphism for Loss {
+pub struct MSELoss;
+
+impl Morphism for MSELoss {
     type Input = (Tensor, Tensor);
     type Output = f32;
 
@@ -18,8 +20,19 @@ impl Morphism for Loss {
     }
 }
 
-pub struct DerivativeLoss;
-impl Morphism for DerivativeLoss {
+pub struct DerivativeMSELoss;
+impl DerivativeMorphism for MSELoss {
+    type Input = (Tensor, Tensor);
+    type Output = Tensor;
+    type Curry = ();
+    fn derivative(
+        &self,
+        _input: Self::Curry,
+    ) -> Rc<dyn Morphism<Input = Self::Input, Output = Self::Output>> {
+        Rc::new(DerivativeMSELoss)
+    }
+}
+impl Morphism for DerivativeMSELoss {
     type Input = (Tensor, Tensor);
     type Output = Tensor;
 
